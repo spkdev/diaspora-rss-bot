@@ -20,7 +20,7 @@ sub _a_replace
   my @text = $node->content_list();
   my $txt = (exists $text[0]) ? (defined $text[0]->attr('text') ? $text[0]->attr('text') : '') : "";
   my $ref = (defined $node->attr('href') ? $node->attr('href') : '');
-  my $link = "[".$txt."](".$ref.")";
+  my $link = "[".htmlEscape( $txt )."](".$ref.")";
   return $link;
 }
 
@@ -39,3 +39,13 @@ sub _img_clickable_replace
   return $img;
 }
 
+
+###############################################################################
+### Helper functions
+###############################################################################
+sub htmlEscape
+{
+  my( $string ) = @_;
+  $string =~ s/#/&#35;/g; # Escape "#" -> "&#35;"
+  return $string;
+}
