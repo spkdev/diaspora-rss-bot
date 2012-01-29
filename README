@@ -1,0 +1,37 @@
+diaspora-rss
+
+This is a little perl script that aggregates RSS/Atom feeds and posts them to a Diaspora* user account.
+This enables you to use you stream as feedreader if you follow the specific hashtags in Diaspora*.
+Some more info can be found here: https://pod.fractal.bz/posts/1859
+
+Currently, the script runs as part of a regular cron job, but I will extend it to a proper daemon.
+This allows more flexibility, e.g. not every feed needs to be checked every 5 or 10 minutes (think of dilbert.com for example).
+
+INSTALL:
+First of all, make sure you have all necessary perl dependencies installed, under Debian squeeze, I had to add the following packages (hope I did not miss one):
+
+libxml-feedpp-perl
+libhtml-wikiconverter-perl
+liblist-moreutils-perl
+libconfig-tiny-perl
+
+src/modules/HTML/WikiConverter/Diaspora.pm:
+The Diaspora.pm module is an additional dialect for the WikiConverter which allows conversion from html to a markup dialect. Since the WikiConverter does 
+not seem to support the Diaspora* markup dialect yet, I added it (for at least the very bare tags I need so far).
+The file needs to be copied to the appropriate location, for Debian squeeze that is '/usr/share/perl5/HTML/WikiConverter/'.
+
+src/diaspora-rss:
+This is the main script. Basically you can put it where you want, I use '/usr/local/bin/' for it.
+I configured my cronjob to call it every 10 minutes (crontab -e):
+*/10 * * * * /usr/local/bin/diaspora-rss >> /var/log/diaspora-rss.log
+
+etc/diaspora-rss/diaspora-rss.conf:
+This is the configuration file, where you configure the feeds to be queried and the Diaspora* account to be posted to. It must be  copied to
+'/etc/diaspora-rss/diaspora-rss.conf' on your machine.
+There is a section [main] where you have to enter the pod details and a section [feeds] where you can configure the RSS/Atom feeds to be queried.
+The bot needs to have write access to this file, as it uses it as feeditem cache as well.
+Since it contains the plaintext password of the bot's diaspora account, you should only make it readable for root.
+
+Final words:
+I am not a perl programmer, in fact, this is more or less my first 'real' perl program, so don't be too harsh about the code ;)
+
