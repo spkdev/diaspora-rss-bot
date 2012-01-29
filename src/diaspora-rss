@@ -1,0 +1,176 @@
+#!/usr/bin/perl -w
+
+use strict;
+use warnings;
+use XML::FeedPP;
+use LWP::UserAgent;
+use HTML::Entities;
+use URI::Escape;
+use HTML::WikiConverter;
+use List::MoreUtils qw(any);
+use Digest::MD5 qw(md5 md5_hex md5_base64);
+use Config::Tiny;
+
+
+my $botName     = "diaspora-rss";
+my $logFilePath = "/var/log/";
+my $logFile     = $logFilePath . $botName . ".log";
+
+# Diaspora/RSS interface stuff
+my $ua          = LWP::UserAgent->new( keep_alive => 1 );
+my $wc          = new HTML::WikiConverter( dialect => 'Diaspora' ); # HTML -> D* markup converter
+my $configfile  = '/etc/diaspora-rss/diaspora-rss.conf';
+my $config      = Config::Tiny->read( $configfile );
+
+# rss bot parameter
+my $pod         = $config->{main}->{pod};
+my $username    = $config->{main}->{username};
+my $passwd      = $config->{main}->{password};
+
+
+###############################################################################
+### MAIN
+###############################################################################
+
+# Enable cookies
+$ua->cookie_jar({});
+
+openLog();
+
+my $auth_token = loginDiaspora();
+
+if( $auth_token ne "" )
+{
+  foreach my $key ( keys %{$config->{feeds}} )
+  {
+    my $url = $config->{feeds}->{$key};
+    my @old_items = values %{$config->{$key}};
+    my @new_items = handleFeed( $auth_token, $url, @old_items );
+    
+    # Delete old hashes
+    for( keys %{$config->{$key}} )
+    {
+      delete $config->{$key}->{$_};
+    }
+
+    # Insert new hashes
+    my $i = '0';    
+    foreach my $item (@new_items)
+    {
+      $config->{$key}->{$i++} = $item;
+    }
+  }
+  $config->write( $configfile );
+  logoutDiaspora();
+}
+
+closeLog();
+
+
+###############################################################################
+### Logging
+###############################################################################
+sub openLog
+{
+	open LOG, ">>$logFile";
+	select((select(LOG), $|=1)[0]); # make the log file "hot" - turn off buffering
+  logEntry("Diaspora* RSS BOT - STARTED");
+}
+
+sub closeLog
+{
+  logEntry("Diaspora* RSS BOT - STOPPED");
+  close LOG
+}
+
+sub logEntry
+{
+  my ($logText) = @_;
+  my ( $sec, $min, $hour, $mday, $mon, $year, $wday, $yday, $isdst ) = localtime(time);
+  my $dateTime = sprintf "%4d-%02d-%02d %02d:%02d:%02d", $year + 1900, $mon + 1, $mday, $hour, $min, $sec;
+  print LOG "$dateTime $logText\n";
+}
+
+
+###############################################################################
+### Diaspora* RSS BOT
+###############################################################################
+sub loginDiaspora
+{
+  my $csrf_param;
+  my $csrf_token;
+  my $sign_in_page = $ua->get( $pod.'/users/sign_in' )->decoded_content();
+
+  $sign_in_page =~ m/"csrf-param" content="([^"]+)"/ or return "";  $csrf_param = decode_entities($1);
+  $sign_in_page =~ m/"csrf-token" content="([^"]+)"/ or return "";  $csrf_token = decode_entities($1);
+
+  my $request = HTTP::Request->new( 'POST', $pod.'/users/sign_in' );
+  $request->header( 'Connection' => 'keep-alive' );
+  $request->header( 'Content-Type' => 'application/x-www-form-urlencoded' );
+  $request->content( 'utf8=%E2%9C%93&'.uri_escape($csrf_param).'='.uri_escape($csrf_token).'&user%5Busername%5D='.$username.'&user%5Bpassword%5D='.$passwd.'&user%5Bremember_me%5D=0&commit=Anmelden' );
+  $ua->request( $request );
+  return $csrf_token;
+}
+
+sub logoutDiaspora
+{
+  my $request = HTTP::Request->new( 'GET', $pod.'/users/sign_out' );
+  $request->header( 'Connection' => 'keep-alive' );
+  $ua->request( $request );  
+}
+
+sub handleFeed
+{
+  my ($token, $url, @old_items ) = @_;
+  my $feed = XML::FeedPP->new( $url );
+
+  my @new_items;  
+  foreach my $item ( $feed->get_item() )
+  {
+    my $digest = md5_hex( $item->title(), $item->description() );
+    push( @new_items, $digest );
+
+    unless( any { $_ eq $digest } @old_items )
+    {
+      logEntry( "NEW ITEM [".$item->title()."]" );
+#      logEntry( $item->description() );
+      postItem( $token, $item, $url );
+    }
+  }
+  return @new_items;
+}
+
+sub postItem
+{
+  my ($token, $item, $url) = @_;
+  my $markup = $wc->html2wiki( html => $item->description() );
+  my $message = "### [".escapeString( $item->title() )."](".escapeString( $item->link() ).")\\r\\n".escapeString( getHashtagsFromUrl( $url ) )."\\r\\n\\r\\n".escapeString( $markup );
+  
+  my $json_message = '{"status_message":{"text":"'.$message.'"},"aspect_ids":"public"}';
+  my $request = HTTP::Request->new( 'POST', $pod.'/status_messages' );
+  $request->header( 'Content-Type' => 'application/json; charset=UTF-8' );
+  $request->header( 'Connection' => 'keep-alive' );
+  $request->header( 'X-CSRF-Token' => $token );
+  $request->content( $json_message );
+  $ua->request( $request );
+}
+
+sub escapeString
+{
+  my ($string) = @_;
+ 
+  $string =~ s/\\/\\\\/g; # Replace '\' with '\\'
+  $string =~ s/\"/\\\"/g; # Replace '"' with '\"'
+  return $string;
+}
+
+sub getHashtagsFromUrl
+{
+  my ($hashtags) = @_;
+  
+  $hashtags =~ s/https?:\/\/([^\/]+).*/$1/g;
+  $hashtags =~ s/\./-/g;  
+  $hashtags = "#rss-".$hashtags." #rss-all";
+  return $hashtags;
+}
+
