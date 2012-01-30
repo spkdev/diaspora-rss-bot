@@ -99,6 +99,7 @@ sub loginDiaspora
 {
   my $csrf_param;
   my $csrf_token;
+  
   my $sign_in_page = $ua->get( $pod.'/users/sign_in' )->decoded_content();
 
   $sign_in_page =~ m/"csrf-param" content="([^"]+)"/ or return "";  $csrf_param = decode_entities($1);
@@ -132,7 +133,7 @@ sub handleFeed
 
     unless( any { $_ eq $digest } @old_items )
     {
-      logEntry( "NEW ITEM [".$item->title()."]" );
+      logEntry( "NEW ITEM [".$url.": ".$item->title()."]" );
 #      logEntry( $item->description() );
       postItem( $token, $item, $url );
     }
@@ -144,7 +145,7 @@ sub postItem
 {
   my ($token, $item, $url) = @_;
   my $markup = $wc->html2wiki( html => $item->description() );
-  my $message = "### [".escapeString( $item->title() )."](".escapeString( $item->link() ).")\\r\\n".escapeString( getHashtagsFromUrl( $url ) )."\\r\\n\\r\\n".escapeString( $markup );
+  my $message = "### [".escapeString( escapeMarkup( $item->title() ) )."](".escapeString( $item->link() ).")\\r\\n".escapeString( getHashtagsFromUrl( $url ) )."\\r\\n\\r\\n".escapeString( $markup );
   
   my $json_message = '{"status_message":{"text":"'.$message.'"},"aspect_ids":"public"}';
   my $request = HTTP::Request->new( 'POST', $pod.'/status_messages' );
@@ -161,6 +162,13 @@ sub escapeString
  
   $string =~ s/\\/\\\\/g; # Replace '\' with '\\'
   $string =~ s/\"/\\\"/g; # Replace '"' with '\"'
+  return $string;
+}
+
+sub escapeMarkup
+{
+  my( $string ) = @_;
+  $string =~ s/([^&])#/$1&#35;/g; # Escape "#" -> "&#35;"
   return $string;
 }
 
