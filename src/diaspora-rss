@@ -2,6 +2,8 @@
 
 use strict;
 use warnings;
+use POSIX;
+use File::Pid;
 use XML::FeedPP;
 use LWP::UserAgent;
 use HTML::Entities;
@@ -12,15 +14,21 @@ use Digest::MD5 qw(md5 md5_hex md5_base64);
 use Config::Tiny;
 
 
-my $botName     = "diaspora-rss";
-my $logFilePath = "/var/log/";
-my $logFile     = $logFilePath . $botName . ".log";
+# daemon stuff
+my $daemonName      = "diaspora-rss";
+my $dieNow          = 0;                                     # used for "infinte loop" construct - allows daemon mode to gracefully exit
+my $sleep           = 300;                                   # number of seconds to wait between "do something" execution after queue is clear
+my $pidFilePath     = "/var/run/";                           # PID file path
+my $logFilePath     = "/var/log/";
+my $configFilePath  = "/etc/".$daemonName."/";
+my $pidFile         = $pidFilePath.$daemonName.".pid";
+my $logFile         = $logFilePath.$daemonName.".log";
+my $configFile      = $configFilePath.$daemonName.".conf";
 
 # Diaspora/RSS interface stuff
 my $ua          = LWP::UserAgent->new( keep_alive => 1 );
 my $wc          = new HTML::WikiConverter( dialect => 'Diaspora' ); # HTML -> D* markup converter
-my $configfile  = '/etc/diaspora-rss/diaspora-rss.conf';
-my $config      = Config::Tiny->read( $configfile );
+my $config      = Config::Tiny->read( $configFile );
 
 # rss bot parameter
 my $pod         = $config->{main}->{pod};
@@ -29,66 +37,114 @@ my $passwd      = $config->{main}->{password};
 
 
 ###############################################################################
-### MAIN
+### DEAMON STUB
+###############################################################################
+use POSIX qw(setsid);
+chdir '/';
+umask 0;
+open STDIN,  '/dev/null'   or die "Can't read /dev/null: $!";
+open STDOUT, '>>'.$logFile or die "Can't write to logfile: $!";
+open STDERR, '>>'.$logFile or die "Can't write to logfile: $!";
+defined( my $pid = fork ) or die "Can't fork: $!";
+exit if $pid;
+
+# dissociate this process from the controlling terminal that started it and stop being part
+# of whatever process group this process was a part of.
+POSIX::setsid() or die "Can't start a new session.";
+
+# callback signal handler for signals.
+$SIG{INT} = $SIG{TERM} = $SIG{HUP} = \&signalHandler;
+$SIG{PIPE} = 'ignore';
+
+# create pid file in /var/run/
+my $pidfile = File::Pid->new( { file => $pidFile, } );
+
+$pidfile->write or die "Can't write PID file: $!";
+
+
+###############################################################################
+### DEAMON
 ###############################################################################
 
 # Enable cookies
-$ua->cookie_jar({});
+$ua->cookie_jar({});  
 
-openLog();
-
-my $auth_token = loginDiaspora();
-
-if( $auth_token ne "" )
+until( $dieNow )
 {
-  foreach my $key ( keys %{$config->{feeds}} )
-  {
-    my $url = $config->{feeds}->{$key};
-    my @old_items = values %{$config->{$key}};
-    my @new_items = handleFeed( $auth_token, $url, @old_items );
-    
-    # Delete old hashes
-    for( keys %{$config->{$key}} )
-    {
-      delete $config->{$key}->{$_};
-    }
+  eval
+  { # try
+    $config = Config::Tiny->read( $configFile );  # Reread config every iteration in order to incorporate new feeds
+    logEntry("Diaspora* RSS BOT - STARTED");
+    my $auth_token = loginDiaspora();
 
-    # Insert new hashes
-    my $i = '0';    
-    foreach my $item (@new_items)
+    if( $auth_token ne "" )
     {
-      $config->{$key}->{$i++} = $item;
+      foreach my $key ( keys %{$config->{feeds}} )
+      {
+        eval
+        { # try      
+          my $url = $config->{feeds}->{$key};
+          my @old_items = values %{$config->{$key}};
+          my @new_items = handleFeed( $auth_token, $url, @old_items );
+          
+          # Delete old hashes
+          for( keys %{$config->{$key}} )
+          {
+            delete $config->{$key}->{$_};
+          }
+
+          # Insert new hashes
+          my $i = '0';    
+          foreach my $item (@new_items)
+          {
+            $config->{$key}->{$i++} = $item;
+          }
+          1;
+        }
+        or do
+        {
+          logEntry( "ERROR: ".$@." -> Processing next item" );
+          next;
+        }
+      }
+      $config->write( $configFile );
+      logoutDiaspora();
     }
+    logEntry("Diaspora* RSS BOT - STOPPED");  
+    1;  # Return true statement
   }
-  $config->write( $configfile );
-  logoutDiaspora();
+  or do
+  { # catch
+    logEntry( "ERROR: ".$@ );
+  };
+
+  # Sleep until next update
+  sleep( $sleep );
 }
 
-closeLog();
+
+# catch signals and end the program if one is caught.
+sub signalHandler
+{
+ $dieNow = 1;    # this will cause the "infinite loop" to exit
+}
+
+# do this stuff when exit() is called.
+END
+{
+  $pidfile->remove if defined $pidfile;
+}
 
 
 ###############################################################################
 ### Logging
 ###############################################################################
-sub openLog
-{
-	open LOG, ">>$logFile";
-	select((select(LOG), $|=1)[0]); # make the log file "hot" - turn off buffering
-  logEntry("Diaspora* RSS BOT - STARTED");
-}
-
-sub closeLog
-{
-  logEntry("Diaspora* RSS BOT - STOPPED");
-  close LOG
-}
-
 sub logEntry
 {
   my ($logText) = @_;
   my ( $sec, $min, $hour, $mday, $mon, $year, $wday, $yday, $isdst ) = localtime(time);
   my $dateTime = sprintf "%4d-%02d-%02d %02d:%02d:%02d", $year + 1900, $mon + 1, $mday, $hour, $min, $sec;
-  print LOG "$dateTime $logText\n";
+  print "$dateTime $logText\n";
 }
 
 
@@ -133,8 +189,7 @@ sub handleFeed
 
     unless( any { $_ eq $digest } @old_items )
     {
-      logEntry( "NEW ITEM [".$url.": ".$item->title()."]" );
-#      logEntry( $item->description() );
+      logEntry( "NEW ITEM [".$url." -> ".$item->title()."]" );
       postItem( $token, $item, $url );
     }
   }
@@ -168,18 +223,24 @@ sub escapeString
 sub escapeMarkup
 {
   my( $string ) = @_;
-  $string =~ s/^#/&#35;/g;        # Escape "#" -> "&#35;" (at beginning)
   $string =~ s/([^&])#/$1&#35;/g; # Escape "#" -> "&#35;"
   return $string;
 }
 
 sub getHashtagsFromUrl
 {
-  my ($hashtags) = @_;
+  my ($hashtag) = @_;
   
-  $hashtags =~ s/https?:\/\/([^\/]+).*/$1/g;
-  $hashtags =~ s/\./-/g;  
-  $hashtags = "#rss-".$hashtags." #rss-all";
-  return $hashtags;
+  for($hashtag)
+  {
+    s/https?:\/\/(.*)\/?$/$1/g; # Cut off protocol
+    s/\/$//;  # Cut off possible trailing /
+    s/[^a-zA-Z0-9_]/-/g;  # Replace special chars with '-'
+  }
+  
+  return "#rss-".$hashtag." #rss-all";
 }
+
+
+
 
