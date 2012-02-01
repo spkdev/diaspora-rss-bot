@@ -46,6 +46,7 @@ sub _img_clickable_replace
 sub htmlEscape
 {
   my( $string ) = @_;
+  $string =~ s/^#/&#35;/g;        # Escape "#" -> "&#35;" (at beginning)
   $string =~ s/([^&])#/$1&#35;/g; # Escape "#" -> "&#35;"
   return $string;
 }
