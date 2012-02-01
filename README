@@ -1,15 +1,12 @@
 diaspora-rss
 
-This is a little perl script that aggregates RSS/Atom feeds and posts them to a Diaspora* user account.
+This is a little perl daemon that aggregates RSS/Atom feeds and posts them to a Diaspora* user account.
 This enables you to use you stream as feedreader if you follow the specific hashtags in Diaspora*.
-Some more info can be found here: https://pod.fractal.bz/posts/1859
-
-Currently, the script runs as part of a regular cron job, but I will extend it to a proper daemon.
-This allows more flexibility, e.g. not every feed needs to be checked every 5 or 10 minutes (think of dilbert.com for example).
 
 INSTALL:
 First of all, make sure you have all necessary perl dependencies installed, under Debian squeeze, I had to add the following packages (hope I did not miss one):
 
+libfile-pid-perl
 libxml-feedpp-perl
 libhtml-wikiconverter-perl
 liblist-moreutils-perl
@@ -21,9 +18,7 @@ not seem to support the Diaspora* markup dialect yet, I added it (for at least t
 The file needs to be copied to the appropriate location, for Debian squeeze that is '/usr/share/perl5/HTML/WikiConverter/'.
 
 src/diaspora-rss:
-This is the main script. Basically you can put it where you want, I use '/usr/local/bin/' for it.
-I configured my cronjob to call it every 10 minutes (crontab -e):
-*/10 * * * * /usr/local/bin/diaspora-rss >> /var/log/diaspora-rss.log
+This is the daemon script. I put it in '/usr/local/bin' and use a script '/etc/init.d/diaspora-rss' to start/stop the deamon. Under debian you can use the template '/etc/init.d/skeleton' and just adjust the path and name.
 
 etc/diaspora-rss/diaspora-rss.conf:
 This is the configuration file, where you configure the feeds to be queried and the Diaspora* account to be posted to. It must be  copied to
