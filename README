@@ -1,5 +1,7 @@
 diaspora-rss
 
+TODO: This document is outdated!
+
 This is a little perl daemon that aggregates RSS/Atom feeds and posts them to a Diaspora* user account.
 This enables you to use you stream as feedreader if you follow the specific hashtags in Diaspora*.
 
