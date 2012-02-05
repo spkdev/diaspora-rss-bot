@@ -1,0 +1,16 @@
+#
+# general configuration section
+[main]
+pod      = https://pod.foo.bar     # the diaspora pod uri
+username = bot@foo.bar             # the bot user on your pod
+password = yoursecret              # the password of the bot user
+database = feeds.db                # sqlite db location
+
+#
+# this section contains feeds. Format:
+# name = url
+# the name will become the tag for the
+# feed on diaspora after posting
+[feeds]
+fefe=http://blog.fefe.de/rss.xml?html
+
