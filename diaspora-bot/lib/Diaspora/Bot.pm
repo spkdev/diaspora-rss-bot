@@ -165,7 +165,7 @@ sub get {
 
   my $json = JSON->new->allow_nonref;
 
-  return $res->content $json->decode( $res->content );
+  return $json->decode( $res->content );
 }
 
 sub _escapeString {
