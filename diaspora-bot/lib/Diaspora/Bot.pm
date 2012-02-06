@@ -96,7 +96,10 @@ sub _login {
   my $post = join '&', map { join '=', ($_, $plist{$_}) } keys %plist;
 
   $request->content( $post );
-  my $r = $self->ua->request( $request ) or croak "Could not login to " . $self->pod . ": $!" ;
+  my $res = $self->ua->request( $request ) or croak "Could not login to " . $self->pod . ": $!" ;
+  if(! $res->is_success) {
+    croak "Could not login to " . $self->pod . ": " . $res->status_line ;
+  }
   $self->loggedin(1);
 }
 
@@ -104,7 +107,10 @@ sub _logout {
   my $self = shift;
   my $request = HTTP::Request->new( 'GET', $self->pod.'/users/sign_out' );
   $request->header( 'Connection' => 'keep-alive' );
-  $self->ua->request( $request ) or croak "Could not logout from " . $self->pod . ": $!" ;  
+  my $res = $self->ua->request( $request ) or croak "Could not logout from " . $self->pod . ": $!" ;  
+  if(! $res->is_success) {
+    croak "Could not logout from " . $self->pod . ": " . $res->status_line ;
+  }
   $self->loggedin(0);
 }
 
@@ -138,6 +144,27 @@ sub post {
   $request->header( 'X-CSRF-Token' => $self->csrftoken );
   $request->content( $json_message );
   $self->ua->request( $request ) or die "Could not post message to " . $self->pod . "$arg{uri}: $!";
+}
+
+sub get {
+  my $self = shift;
+  my %arg  = @_;
+
+  $self->_login();
+
+  my $request = HTTP::Request->new( 'GET', $self->pod . $arg{uri} );
+  $request->header( 'Content-Type' => 'application/json; charset=UTF-8' );
+  $request->header( 'Connection'   => 'keep-alive' );
+  $request->header( 'X-CSRF-Token' => $self->csrftoken );
+  my $res = $self->ua->request( $request ) or die "Could not post message to " . $self->pod . "$arg{uri}: $!";
+   
+  if(! $res->is_success) {
+    croak "Could not get $arg{uri} from " . $self->pod . ": " . $res->status_line ;
+  }
+
+  my $json = JSON->new->allow_nonref;
+
+  return $json->decode( $res->content );
 }
 
 sub _escapeString {
