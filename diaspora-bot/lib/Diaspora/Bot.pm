@@ -97,7 +97,7 @@ sub _login {
 
   $request->content( $post );
   my $res = $self->ua->request( $request ) or croak "Could not login to " . $self->pod . ": $!" ;
-  if(! $res->is_success) {
+  if(! $res->code == 302) {
     croak "Could not login to " . $self->pod . ": " . $res->status_line ;
   }
   $self->loggedin(1);
@@ -108,7 +108,7 @@ sub _logout {
   my $request = HTTP::Request->new( 'GET', $self->pod.'/users/sign_out' );
   $request->header( 'Connection' => 'keep-alive' );
   my $res = $self->ua->request( $request ) or croak "Could not logout from " . $self->pod . ": $!" ;  
-  if(! $res->is_success) {
+  if(! $res->code == 302) {
     croak "Could not logout from " . $self->pod . ": " . $res->status_line ;
   }
   $self->loggedin(0);
