@@ -153,7 +153,8 @@ sub get {
   $self->_login();
 
   my $request = HTTP::Request->new( 'GET', $self->pod . $arg{uri} );
-  $request->header( 'Content-Type' => 'application/json; charset=UTF-8' );
+  $request->header( 'Content-Type' => 'application/jsonrequest; charset=UTF-8' );
+  $request->header( 'Accept'       => 'application/jsonrequest' );
   $request->header( 'Connection'   => 'keep-alive' );
   $request->header( 'X-CSRF-Token' => $self->csrftoken );
   my $res = $self->ua->request( $request ) or die "Could not post message to " . $self->pod . "$arg{uri}: $!";
@@ -164,7 +165,7 @@ sub get {
 
   my $json = JSON->new->allow_nonref;
 
-  return $json->decode( $res->content );
+  return $res->content $json->decode( $res->content );
 }
 
 sub _escapeString {
