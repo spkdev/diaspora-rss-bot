@@ -150,7 +150,11 @@ Options:
 -p <pod>  | --pod=<pod>        use <pod> uri as diaspora pod
 -d        | --debug            do not fork into background and print logs to stdout
 -D <db>   | --database=<db>    use sqlite db <db> file to store feed information
-
+-f <file> | --pidfile=<file>   store PID in the file <file>.
+                               (default: /tmp/${daemonName}.pid)
+-l <file> | --logfile=<file>   store log messages to <file>.
+                               (default: /tmp/${daemonName}.log)
+                               
 Config file (if not specified via commandline) might be located in one of the
 following locations. $0 looks for them in this order:
 
