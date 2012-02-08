@@ -115,23 +115,27 @@ sub wchild {
 
 sub logEntry {
   my ($logText) = @_;
-  my ( $sec, $min, $hour, $mday, $mon, $year, $wday, $yday, $isdst ) = localtime(time);
+  my ($sec, $min, $hour, $mday, $mon, $year, $wday, $yday, $isdst) = localtime(time);
   my $dateTime = sprintf "%4d-%02d-%02d %02d:%02d:%02d", $year + 1900, $mon + 1, $mday, $hour, $min, $sec;
   print "$dateTime $logText\n";
 }
 
 sub handleFeed {
-  my ($guid, %feedcache) = @_;
- 
-  if(! &itemexists("oldfeeds", $guid) ) {
-    my $url     = $feedcache{$guid}{url};
-    my $item    = $feedcache{$guid}{item};
-    my @tags    = @{$feedcache{$guid}{tags}};
-    my $tagstr  = join ' ', map { "#$_" } @tags;
-    logEntry( "NEW ITEM [$url -> \"".$item->title()."\" tags: $tagstr]" );
-    $diaspora->postfeed(tags => [ @tags, 'rss-all'] , aspect => 'public', link => $item->link, title => $item->title, body => $item->description, uri => $url);
+  my ($item_guid, %feedcache) = @_;
+  my @tags    = @{$feedcache{$item_guid}{tags}};
+  my @urls    = @{$feedcache{$item_guid}{urls}};
+  my $tagstr  = join ' ', map { "#$_" } @tags;
+	my $global_guid = md5_hex( $tagstr, $item_guid );
+
+  if(! &itemexists("oldfeeds", $global_guid) ) {
+    my $item    = $feedcache{$item_guid}{item};
+    logEntry( "NEW ITEM [$urls[0] -> \"".$item->title()."\" tags: $tagstr]" );
+    $diaspora->postfeed(tags => [ @tags, 'rss-all'] , aspect => 'public', link => $item->link, title => $item->title, body => $item->description, uri => $urls[0]);
   }
-  &insertitem("feeds", $guid);
+  
+	foreach my $url ( @urls ) {
+	  &insertitem("feeds", $url, $global_guid);
+	}
 }
 
 
@@ -176,7 +180,7 @@ $diaspora = Diaspora::Bot::Feed->new(pod => $pod, user => $user, passwd => $pass
 ###############################################################################
 until( $dieNow ) {
   eval {
-    # Reread config every iteration in order to incorporate new feeds
+    # Reread config every iteration in order to incorporate new feeds and delete removed feeds from cache
     if(! ($config = Config::Tiny->read( $cfgfile ))) {
       logEntry("Diaspora* RSS BOT - failed to re-read the config $cfgfile: $!");
       exit 1;
@@ -195,10 +199,10 @@ until( $dieNow ) {
 
           foreach my $item ( $feed->get_item() )
           {
-            my $guid = md5_hex( $item->title(), $item->description() );
-            $feedcache{$guid}{url}  = $url;
-            $feedcache{$guid}{item} = $item;
-            push @{ $feedcache{$guid}{tags} }, $tag;            
+            my $item_guid = md5_hex( $item->title(), $item->description() );
+            $feedcache{$item_guid}{item} = $item;
+            push @{ $feedcache{$item_guid}{tags} }, $tag;
+						push @{ $feedcache{$item_guid}{urls} }, $url;
           }
           1;
         }
@@ -209,9 +213,9 @@ until( $dieNow ) {
       }  
 
       # Iterate all feeds and only post new items
-      foreach my $guid ( keys %feedcache ) {
+      foreach my $item_guid ( keys %feedcache ) {
         eval {
-          handleFeed( $guid, %feedcache );
+          handleFeed( $item_guid, %feedcache );
           1;
         }
         or do {
@@ -219,6 +223,9 @@ until( $dieNow ) {
         }
       }
       $diaspora->logout;
+
+			&mergetable( "oldfeeds", "feeds" );
+			&cliptable( "feeds", values %{$config->{feeds}} );
       &droptable( "oldfeeds" );
     }
     logEntry("Diaspora* RSS BOT - STOPPED");  
@@ -232,28 +239,27 @@ until( $dieNow ) {
   sleep( $sleep );
 }
 
-
 sub preparedb {
   my ($table) = @_;
   my $dbh  = DBI->connect("dbi:SQLite:$db") or die "Could not connect to sqlite db $db: $!\n";
-  my $sth  = $dbh->prepare( "CREATE TABLE IF NOT EXISTS $table (md5 varchar(255) NOT NULL);" );
+  my $sth  = $dbh->prepare( "CREATE TABLE IF NOT EXISTS $table (url varchar(255) NOT NULL, guid varchar(255) NOT NULL);" );
   $sth->execute() or die "Could not create table for sqlite db $db: $!\n";
   return $dbh;
 }
 
 sub insertitem {
-  my ($table, $md5) = @_;
-  my $sth  = $dbh->prepare( "INSERT INTO $table VALUES(?);" );
-  $sth->execute($md5) or die "Could not insert $md5 in table $table: $!\n";
+  my ($table, $url, $guid) = @_;
+  my $sth  = $dbh->prepare( "INSERT INTO $table VALUES(?,?);" );
+  $sth->execute($url, $guid) or die "Could not insert ($url, $guid) in table $table: $!\n";
 }
 
 sub itemexists {
-  my ($table, $md5) = @_;
-  my $sth  = $dbh->prepare( "SELECT * FROM $table WHERE md5 = ?;" );
-  $sth->execute($md5) or die "Could not find $md5 in table $table: $!\n";
+  my ($table, $guid) = @_;
+  my $sth  = $dbh->prepare( "SELECT * FROM $table WHERE guid = ?;" );
+  $sth->execute($guid) or die "Could not find $guid in table $table: $!\n";
   my $row = $sth->fetchrow_hashref;
   if($row) {
-    if(exists $row->{md5}) {
+    if(exists $row->{guid}) {
       return 1;
     }
   }
@@ -264,7 +270,7 @@ sub itemexists {
 
 sub createtable {
   my ($table) = @_;
-  my $sth  = $dbh->prepare( "CREATE TABLE IF NOT EXISTS $table (md5 varchar(255) NOT NULL);" );
+  my $sth  = $dbh->prepare( "CREATE TABLE IF NOT EXISTS $table (url varchar(255) NOT NULL, guid varchar(255) NOT NULL);" );
   $sth->execute() or die "Could not create table for sqlite db $db: $!\n";  
 }
 
@@ -280,4 +286,16 @@ sub renametable {
   $sth->execute() or die "Could not rename table $oldname to $newname from sqlite db $db: $!\n";
 }
 
+sub mergetable {
+	my ($old, $new) = @_;
+  my $sth  = $dbh->prepare( "INSERT INTO $new SELECT * FROM $old AS old WHERE NOT EXISTS (SELECT * FROM $new AS new WHERE new.url = old.url);" );
+  $sth->execute() or die "Could not merge $old with $new: $!\n";
+}
+
+sub cliptable {
+	my ($table, @urls) = @_;
+  my $params = join ',', map { "?" } @urls;
+  my $sth  = $dbh->prepare( "DELETE FROM $table WHERE url NOT IN ($params);" );
+  $sth->execute(@urls) or die "Could not clip $table: $!\n";
+}
 
