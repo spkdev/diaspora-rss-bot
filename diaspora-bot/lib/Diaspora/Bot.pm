@@ -12,8 +12,8 @@ use HTML::WikiConverter;
 use JSON;
 use utf8;
 
-our $VERSION = '0.01';
-our %flags   = qw(pod 1 user 1 passwd 1 csrftoken 0 ua 0 wc 0);
+our $VERSION = '0.02';
+our %flags   = qw(pod 1 user 1 passwd 1 csrftoken 0 ua 0 wc 0 loggedin 0);
 
 
 foreach my $flag (keys %flags) {
@@ -33,7 +33,7 @@ foreach my $flag (keys %flags) {
 
 sub new {
   my $class = shift;
-  my $self = bless { loggedin => 0 }, $class;
+  my $self = bless { }, $class;
   return $self->init(@_);
 }
 
@@ -66,7 +66,7 @@ sub init {
 sub _login {
   my $self = shift;
 
-  if (!$self->{loggedin}) {
+  if (!$self->loggedin) {
     my $csrf_param;
     my $sign_in_page = $self->ua->get( $self->pod.'/users/sign_in' )->decoded_content()
       or croak "Could not connect to " . $self->pod . ": $!";
@@ -96,7 +96,7 @@ sub _login {
     if(! $res->code == 302) {
       croak "Could not login to " . $self->pod . ": " . $res->status_line ;
     }
-    $self->{loggedin} = 1;
+    $self->loggedin(1);
   }
 }
 
@@ -104,17 +104,17 @@ sub _logout {
   my $self = shift;
   my $request = HTTP::Request->new( 'GET', $self->pod.'/users/sign_out' );
   $request->header( 'Connection' => 'keep-alive' );
-  my $res = $self->ua->request( $request ) or croak "Could not logout from " . $self->pod . ": $!" ;  
+  my $res = $self->ua->request( $request ) or croak "Could not logout from " . $self->pod . ": $!" ;
   if(! $res->code == 302) {
     croak "Could not logout from " . $self->pod . ": " . $res->status_line ;
   }
-  $self->{loggedin} = 0;
+  $self->loggedin(0);
 }
 
 sub logout {
   my $self = shift;
 
-  if ($self->{loggedin}) {
+  if ($self->loggedin) {
     return $self->_logout;
   }
   else {
@@ -155,7 +155,7 @@ sub get {
   $request->header( 'Connection'   => 'keep-alive' );
   $request->header( 'X-CSRF-Token' => $self->csrftoken );
   my $res = $self->ua->request( $request ) or die "Could not post message to " . $self->pod . "$arg{uri}: $!";
-   
+
   if(! $res->is_success) {
     croak "Could not get $arg{uri} from " . $self->pod . ": " . $res->status_line ;
   }
@@ -168,7 +168,7 @@ sub get {
 sub _escapeString {
   my $self   = shift;
   my $string = shift;
- 
+
   $string =~ s/\\/\\\\/g; # Replace '\' with '\\'
   $string =~ s/\"/\\\"/g; # Replace '"' with '\"'
   return $string;
