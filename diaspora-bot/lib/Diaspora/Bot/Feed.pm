@@ -18,7 +18,6 @@ sub postfeed {
                uri     => '/status_messages' );
 }
 
-
 sub _feed2message {
   my $self = shift;
   my %arg  = @_;
@@ -36,8 +35,7 @@ sub _feed2message {
 sub _link {
   my $self = shift;
   my %arg  = @_;
-
-  return sprintf "### [%s](%s)\r\n", $self->_escape($arg{title}), $self->_escape($arg{link}); 
+  return sprintf "### [%s](%s)\r\n", $self->_escape($self->_strip($arg{title})), $self->_escape($arg{link}); 
 }
 
 sub _tags {
@@ -56,17 +54,23 @@ sub _tags {
   return $tags;
 }
 
-sub _escape{
+sub _escape {
   my $self = shift;
   my $string = shift;
-  $string =~ s/^#/&#35;/g;        # Escape "#" -> "&#35;" (at beginning)
-  $string =~ s/([^&])#/$1&#35;/g; # Escape "#" -> "&#35;"
-  $string =~ s/\\/\\\\/g;         # Replace '\' with '\\'
-  $string =~ s/\"/\\\"/g;         # Replace '"' with '\"'
-
+	for($string)
+	{
+		s/^#/&#35;/g;        # Escape "#" -> "&#35;" (at beginning)
+  	s/([^&])#/$1&#35;/g; # Escape "#" -> "&#35;"
+	}
   return $string;
 }
 
+sub _strip {
+  my $self = shift;
+  my $string = shift;
+  $string =~ tr/\x00-\x1F//d;
+  return $string;
+}
 
 sub _tagfromuri {
   my $self = shift;
