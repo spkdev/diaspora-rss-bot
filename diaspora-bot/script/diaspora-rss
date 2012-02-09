@@ -36,8 +36,10 @@ GetOptions (
   "log|l=s"    => \$logfile,
   "pidfile|f=s"=> \$pidfile,
   "database|D=s" => \$db,
-  "help|h|?!"  => \$help,
-  "version|v!" => \$version,
+  "fetchonly|o!" => \$fetchonly,
+  "keepold|k=s"  => \$keepold,
+  "help|h|?!"    => \$help,
+  "version|v!"   => \$version,
 ) or &usage;
 
 if($version) {
