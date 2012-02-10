@@ -17,7 +17,7 @@ use DBI;
 
 use Diaspora::Bot::Feed;
 
-our $VERSION = '0.01';
+our $VERSION = '0.03';
 
 my $daemonName      = "diaspora-rss";
 my $dieNow          = 0;
