@@ -11,35 +11,35 @@ sub rules
     strong => { alias => 'b' },
     em => { alias => 'i' },
     a => { replace => \&_a_replace },
-    img => { replace => \&_img_clickable_replace }
+    img => { replace => \&_img_replace }
   };
+}
+
+sub postprocess_output
+{
+  my( $self, $outref ) = @_;
+  # Convert a regular image link to a 'clickable' image link. Image links that are already 'clickable' are left as is.
+  $$outref =~ s/([^[]\s*)!\[[^]]*]\(([^)]*)\)/$1\[!\[$2\]\($2\)\]\($2\)/g;
+  $$outref =~ s/^!\[[^]]*]\(([^)]*)\)/\[!\[$1\]\($1\)\]\($1\)/g;
 }
 
 sub _a_replace
 {
   my( $self, $node, $rules ) = @_;
   my @text = $node->content_list();
-  my $txt = (exists $text[0]) ? (defined $text[0]->attr('text') ? $text[0]->attr('text') : '') : "";
+
+  my $txt = (exists $text[0]) ? (defined $text[0]->attr('text') ? $text[0]->attr('text') : $self->get_elem_contents( $node ) ) : 'link';
   my $ref = (defined $node->attr('href') ? $node->attr('href') : '');
   my $link = "[".htmlEscape( $txt )."](".$ref.")";
   return $link;
 }
 
-# Currently unused, as I use "_img_clickable_replace" function to generate clickable images for Diaspora*
 sub _img_replace
 {
   my( $self, $node, $rules ) = @_;
   my $img = "![".$node->attr('src')."](".$node->attr('src').")";
   return $img;
 }
-
-sub _img_clickable_replace
-{
-  my( $self, $node, $rules ) = @_;
-  my $img = "[![".$node->attr('src')."](".$node->attr('src').")](".$node->attr('src').")";
-  return $img;
-}
-
 
 ###############################################################################
 ### Helper functions
@@ -51,3 +51,4 @@ sub htmlEscape
   $string =~ s/([^&])#/$1&#35;/g; # Escape "#" -> "&#35;"
   return $string;
 }
+
