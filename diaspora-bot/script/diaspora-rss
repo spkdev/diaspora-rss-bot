@@ -24,27 +24,25 @@ my $dieNow          = 0;
 my $sleep           = 300;
 
 my @cfgsearch       = ("$ENV{HOME}/.${daemonName}", "/etc/${daemonName}.conf", "/usr/local/etc/${daemonName}.conf");
-my ($db, $config, $cfgfile, $debug, $pod, $user, $passwd, $logfile, $pidfile, $help, $version, $diaspora);
+my ($db, $config, $cfgfile, $debug, $pod, $user, $passwd, $logfile, $pidfile, $help, $version, $diaspora );
 
 Getopt::Long::Configure( qw(no_ignore_case));
 GetOptions (
-  "config|c=s" => \$cfgfile,
-  "debug|d!"   => \$debug,
-  "pod|p=s"    => \$pod,
-  "user|u=s"   => \$user,
-  "passwd|P=s" => \$passwd,
-  "log|l=s"    => \$logfile,
-  "pidfile|f=s"=> \$pidfile,
+  "config|c=s"   => \$cfgfile,
+  "debug|d!"     => \$debug,
+  "pod|p=s"      => \$pod,
+  "user|u=s"     => \$user,
+  "passwd|P=s"   => \$passwd,
+  "log|l=s"      => \$logfile,
+  "pidfile|f=s"  => \$pidfile,
   "database|D=s" => \$db,
-  "fetchonly|o!" => \$fetchonly,
-  "keepold|k=s"  => \$keepold,
   "help|h|?!"    => \$help,
   "version|v!"   => \$version,
 ) or &usage;
 
 if($version) {
   print "${daemonName} version ${VERSION}\n";
-  exit;  
+  exit;
 }
 
 if($help) {
@@ -69,8 +67,8 @@ if(! ($config = Config::Tiny->read( $cfgfile ))) {
   exit 1;
 }
 
-$pod     ||= $config->{main}->{pod}; 
-$user    ||= $config->{main}->{username}; 
+$pod     ||= $config->{main}->{pod};
+$user    ||= $config->{main}->{username};
 $passwd  ||= $config->{main}->{password};
 $pidfile ||= $config->{main}->{pidfile};
 $pidfile ||= "/tmp/${daemonName}.pid";
