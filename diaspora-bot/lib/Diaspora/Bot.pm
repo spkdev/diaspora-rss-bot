@@ -11,7 +11,6 @@ use URI::Escape;
 use HTML::WikiConverter;
 use JSON;
 use utf8;
-use Data::Dumper;
 
 our $VERSION = '0.03';
 our %flags   = qw(pod 1 user 1 passwd 1 csrftoken 0 ua 0 wc 0 loggedin 0);
@@ -24,13 +23,14 @@ foreach my $flag (keys %flags) {
     *$fun = sub {
       my \$self = shift;
       my \$val  = shift;
-      if (\$val) {
-        \$self->{$flag} = \$val;
+      if (defined(\$val)) {
+        \$self->{\$flag} = \$val;
       }
-      return \$self->{$flag};
+      return \$self->{\$flag};
     }
-  );#)
+  );
 }
+
 
 sub new {
   my $class = shift;
@@ -63,6 +63,7 @@ sub init {
   $self->ua(LWP::UserAgent->new( keep_alive => 1 ));
   $self->ua->cookie_jar({});
   $self->wc(HTML::WikiConverter->new( dialect => 'Diaspora' ));
+  $self->loggedin(0);
   return $self;
 }
 
@@ -112,7 +113,7 @@ sub _logout {
   if(! $res->code == 302) {
     croak "Could not logout from " . $self->pod . ": " . $res->status_line ;
   }
-  $self->{loggedin} = 0;
+  $self->loggedin(0);
 }
 
 sub logout {
