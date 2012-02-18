@@ -15,7 +15,6 @@ use utf8;
 our $VERSION = '0.03';
 our %flags   = qw(pod 1 user 1 passwd 1 csrftoken 0 ua 0 wc 0 loggedin 0);
 
-
 foreach my $flag (keys %flags) {
   my $pkg = __PACKAGE__;
   my $fun = "${pkg}::${flag}";
@@ -145,7 +144,7 @@ sub post {
   $request->header( 'Connection'   => 'keep-alive' );
   $request->header( 'X-CSRF-Token' => $self->csrftoken );
   $request->content( $json_message );
-  $self->ua->request( $request ) or die "Could not post message to " . $self->pod . "$arg{uri}: $!";
+  $self->ua->request( $request ) or die "POST request failed: " . $self->pod . "$arg{uri}: $!";
 }
 
 sub get {
@@ -155,19 +154,20 @@ sub get {
   $self->_login();
 
   my $request = HTTP::Request->new( 'GET', $self->pod . $arg{uri} );
-  $request->header( 'Content-Type' => 'application/json; charset=UTF-8' );
-  $request->header( 'Accept'       => 'application/json' );
-  $request->header( 'Connection'   => 'keep-alive' );
-  $request->header( 'X-CSRF-Token' => $self->csrftoken );
-  my $res = $self->ua->request( $request ) or die "Could not post message to " . $self->pod . "$arg{uri}: $!";
+  $request->header( 'Accept'        => 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8' );
+  $request->header( 'Connection'    => 'keep-alive' );
+  $request->header( 'Pragma'        => 'no-cache' );
+  $request->header( 'Cache-Control' => 'no-cache' );
+  my $response = $self->ua->request( $request ) or die "GET request failed: " . $self->pod . "$arg{uri}: $!";
 
-  if(! $res->is_success) {
-    croak "Could not get $arg{uri} from " . $self->pod . ": " . $res->status_line ;
+  if( $response->is_success )
+  {
+    return $response->decoded_content;
   }
-
-  my $json = JSON->new->allow_nonref;
-
-  return $json->decode( $res->content );
+  else
+  {
+    return "";
+  }
 }
 
 sub _escapeString {
