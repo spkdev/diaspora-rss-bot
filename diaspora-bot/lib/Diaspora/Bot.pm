@@ -15,6 +15,10 @@ use utf8;
 our $VERSION = '0.03';
 our %flags   = qw(pod 1 user 1 passwd 1 csrftoken 0 ua 0 wc 0 loggedin 0);
 
+# Constant regex patterns used for parsing the html responses
+use constant PATTERN_CONTACT => "data-person-short-name='(.+?)' data-person_id='(.+?)'.+?<div class='info'>(.+?)</div>";
+
+
 foreach my $flag (keys %flags) {
   my $pkg = __PACKAGE__;
   my $fun = "${pkg}::${flag}";
@@ -126,14 +130,16 @@ sub logout {
   }
 }
 
-sub post {
+sub post
+{
   my $self = shift;
   my %arg  = @_;
 
   $self->_login();
 
   my $json = JSON->new->allow_nonref;
-  if(! utf8::is_utf8($arg{message})) {
+  if(! utf8::is_utf8($arg{message}))
+  {
     $json = $json->utf8(0);
   }
 
@@ -147,7 +153,8 @@ sub post {
   $self->ua->request( $request ) or die "POST request failed: " . $self->pod . "$arg{uri}: $!";
 }
 
-sub get {
+sub get
+{
   my $self = shift;
   my %arg  = @_;
 
@@ -170,7 +177,30 @@ sub get {
   }
 }
 
-sub _escapeString {
+sub get_contacts
+{
+  my $self = shift;
+  my @contacts;
+  my $counter = 1;
+  my $last;
+
+  $self->_login();
+
+  do
+  {
+    $last = @contacts;
+    my $html = $self->get( uri => '/contacts?set=all&page='.$counter++ );
+    $html =~ s/[\n\r]//mg;
+
+    my $regex = qr/${\(PATTERN_CONTACT)}/;
+    push @contacts, { "short_name" => $1, "user_id" => $2, "diaspora_id" => $3 } while $html =~ /$regex/g;
+  }
+  while( $last < @contacts );
+  return @contacts;
+}
+
+sub _escapeString
+{
   my $self   = shift;
   my $string = shift;
 
@@ -179,7 +209,8 @@ sub _escapeString {
   return $string;
 }
 
-sub _escapeMarkup {
+sub _escapeMarkup
+{
   my $self   = shift;
   my $string = shift;
 
