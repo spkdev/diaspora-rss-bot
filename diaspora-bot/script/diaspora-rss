@@ -8,12 +8,15 @@ use warnings;
 use POSIX;
 use POSIX qw(setsid);
 use File::Pid;
-use XML::FeedPP;
-
+use XML::Feed;
 use Digest::MD5 qw(md5 md5_hex md5_base64);
 use Config::Tiny;
 use Getopt::Long;
 use DBI;
+use utf8;
+
+# tmp test
+use Encode;
 
 use Diaspora::Bot::Feed;
 
@@ -120,19 +123,24 @@ sub logEntry {
   print "$dateTime $logText\n";
 }
 
-sub handleFeed {
+sub handleFeed
+{
   my ($item_guid, %feedcache) = @_;
   my @tags    = @{$feedcache{$item_guid}{tags}};
   my @urls    = @{$feedcache{$item_guid}{urls}};
   my $tagstr  = join ' ', map { "#$_" } @tags;
 	my $global_guid = md5_hex( $tagstr, $item_guid );
 
-  if(! &itemexists("oldfeeds", $global_guid) ) {
-    my $item    = $feedcache{$item_guid}{item};
-    logEntry( "NEW ITEM [$urls[0] -> \"".$item->title()."\" tags: $tagstr]" );
-    $diaspora->postfeed(tags => [ @tags, 'rss-all'] , aspect => 'public', link => $item->link, title => $item->title, body => $item->description, uri => $urls[0]);
+  if(! &itemexists("oldfeeds", $global_guid) )
+  {
+    my $link    = $feedcache{$item_guid}{link};
+    my $title   = $feedcache{$item_guid}{title};
+    my $content = $feedcache{$item_guid}{content};
+
+    logEntry( "NEW ITEM [$urls[0] -> \"".$title."\" tags: $tagstr]" );
+    $diaspora->postfeed(tags => [ @tags, 'rss-all'] , aspect => 'public', link => $link, title => $title, body => $content, uri => $urls[0]);
   }
-  
+
 	foreach my $url ( @urls ) {
 	  &insertitem("feeds", $url, $global_guid);
 	}
@@ -192,15 +200,24 @@ until( $dieNow ) {
 
     if( $diaspora ) {
       my %feedcache;
+
       foreach my $tag ( keys %{$config->{feeds}} ) {
         eval {
           my $url = $config->{feeds}->{$tag};
-          my $feed = XML::FeedPP->new( $url );
+          my $feed = XML::Feed->parse( URI->new( $url ) );
 
-          foreach my $item ( $feed->get_item() )
+          foreach my $item ( $feed->entries )
           {
-            my $item_guid = md5_hex( $item->title(), $item->description() );
-            $feedcache{$item_guid}{item} = $item;
+            my $content = (defined $item->content->body) ? $item->content->body : (defined $item->summary->body) ? $item->summary->body : "";
+            my $title   = utf8::is_utf8($item->title) ? encode('utf8', $item->title)  : $item->title;
+            my $link    = utf8::is_utf8($item->link)  ? encode('utf8', $item->link)   : $item->link;
+            $content    = utf8::is_utf8($content)     ? encode('utf8', $content)      : $content;
+
+            my $item_guid = md5_hex( $title.$content );
+            $feedcache{$item_guid}{title}   = $title;
+            $feedcache{$item_guid}{content} = $content;
+            $feedcache{$item_guid}{link}    = $link;
+
             push @{ $feedcache{$item_guid}{tags} }, $tag;
 						push @{ $feedcache{$item_guid}{urls} }, $url;
           }
