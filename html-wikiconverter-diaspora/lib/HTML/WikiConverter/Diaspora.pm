@@ -37,7 +37,7 @@ sub _a_replace
 sub _img_replace
 {
   my( $self, $node, $rules ) = @_;
-  my $img = "![".$node->attr('src')."](".$node->attr('src').")";
+  my $img = "![".$node->attr('src')."](".$node->attr('src').")\n\n";
   return $img;
 }
 
