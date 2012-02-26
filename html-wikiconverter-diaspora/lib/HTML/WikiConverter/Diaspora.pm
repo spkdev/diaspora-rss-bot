@@ -19,8 +19,8 @@ sub postprocess_output
 {
   my( $self, $outref ) = @_;
   # Convert a regular image link to a 'clickable' image link. Image links that are already 'clickable' are left as is.
-  $$outref =~ s/([^[]\s*)!\[[^]]*]\(([^)]*)\)/$1\[!\[$2\]\($2\)\]\($2\)/g;
-  $$outref =~ s/^!\[[^]]*]\(([^)]*)\)/\[!\[$1\]\($1\)\]\($1\)/g;
+  $$outref =~ s/([^[]\s*)!\[([^]]*)]\(([^)]*)\)/$1\[!\[$2\]\($3\)\]\($3\)/g;
+  $$outref =~ s/^!\[([^]]*)]\(([^)]*)\)/\[!\[$1\]\($2\)\]\($2\)/g;
 
   # Append linebreaks after image, so subsequent text starts on new paragraph 
   $$outref =~ s/(\[!\[[^]]*\]\([^]]*\)\]\([^]]*\))/$1\n\n/g;
@@ -31,7 +31,7 @@ sub _a_replace
   my( $self, $node, $rules ) = @_;
   my @text = $node->content_list();
 
-  my $txt = (exists $text[0]) ? (defined $text[0]->attr('text') ? $text[0]->attr('text') : $self->get_elem_contents( $node ) ) : 'link';
+  my $txt = (exists $text[0]) ? (defined $text[0]->attr('text') ? $text[0]->attr('text') : $self->get_elem_contents( $node ) ) : '';
   my $ref = (defined $node->attr('href') ? $node->attr('href') : '');
   my $link = "[".htmlEscape( $txt )."](".$ref.")";
   return $link;
@@ -40,7 +40,7 @@ sub _a_replace
 sub _img_replace
 {
   my( $self, $node, $rules ) = @_;
-  my $img = "![".$node->attr('src')."](".$node->attr('src').")";
+  my $img = "![](".$node->attr('src').")";
   return $img;
 }
 
