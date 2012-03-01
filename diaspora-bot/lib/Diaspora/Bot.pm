@@ -16,8 +16,8 @@ our $VERSION = '0.03';
 our %flags   = qw(pod 1 user 1 passwd 1 csrftoken 0 ua 0 wc 0 loggedin 0);
 
 # Constant regex patterns used for parsing the html responses
-use constant PATTERN_CONTACT => "data-person-short-name='(.+?)' data-person_id='(.+?)'.+?<div class='info'>(.+?)</div>";
-
+use constant PATTERN_CONTACT      => "data-person-short-name='(.+?)' data-person_id='(.+?)'.+?<div class='info'>(.+?)</div>";
+use constant PATTERN_CONVERSATION => "<div class=(?:'stream_element conversation'|'conversation stream_element unread') data-guid='(.+?)'.+?data-person_id=\"(.+?)\".+?<div class='ltr'>(.+?)</div>";
 
 foreach my $flag (keys %flags) {
   my $pkg = __PACKAGE__;
@@ -198,6 +198,29 @@ sub get_contacts
   while( $last < @contacts );
   return @contacts;
 }
+
+sub get_conversations
+{
+  my $self = shift;
+  my @conversations;
+  my $counter = 1;
+  my $last;
+
+  $self->_login();
+
+  do
+  {
+    $last = @conversations;
+    my $html = $self->get( uri => '/conversations?page='.$counter++ );
+    $html =~ s/[\n\r]//mg;
+
+    my $regex = qr/${\(PATTERN_CONVERSATION)}/;
+    push @conversations, { "id" => $1, "from" => $2, "subject" => $3 } while $html =~ /$regex/g;
+  }
+  while( $last < @conversations );
+  return @conversations;
+}
+
 
 sub _escapeString
 {
