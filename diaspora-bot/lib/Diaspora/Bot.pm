@@ -13,11 +13,15 @@ use JSON;
 use utf8;
 
 our $VERSION = '0.03';
-our %flags   = qw(pod 1 user 1 passwd 1 csrftoken 0 ua 0 wc 0 loggedin 0);
+our %flags   = qw(pod 1 user 1 passwd 1 csrfparam 0 csrftoken 0 ua 0 wc 0 loggedin 0);
 
 # Constant regex patterns used for parsing the html responses
-use constant PATTERN_CONTACT      => "data-person-short-name='(.+?)' data-person_id='(.+?)'.+?<div class='info'>(.+?)</div>";
-use constant PATTERN_CONVERSATION => "<div class=(?:'stream_element conversation'|'conversation stream_element unread') data-guid='(.+?)'.+?data-person_id=\"(.+?)\".+?<div class='ltr'>(.+?)</div>";
+use constant PATTERN_CONTACT        => "data-person-short-name='(.+?)' data-person_id='(.+?)'.+?<div class='info'>(.+?)</div>";
+use constant PATTERN_ASPECT         => "data-aspect_id='(.+?)'><a class='aspect_selector' href=.+?>(.+?)<div class='contact_count'>";
+use constant PATTERN_ASPECT_CONTACT => "<img alt=.+?class=\"avatar\" data-person_id=\"(.+?)\" src=.+? title=.+?>";
+use constant PATTERN_CONVERSATION   => "<div class=(?:'stream_element conversation'|'conversation stream_element unread') data-guid='(.+?)'.+?data-person_id=\"(.+?)\".+?<div class='ltr'>(.+?)</div>";
+use constant PATTERN_MESSAGE        => "<div class='stream_element' data-guid=.+?class=\"avatar\" data-person_id=\"(.+?)\" src=.+?<div class='ltr'>(.*?)</div>";
+
 
 foreach my $flag (keys %flags) {
   my $pkg = __PACKAGE__;
@@ -35,13 +39,15 @@ foreach my $flag (keys %flags) {
 }
 
 
-sub new {
+sub new
+{
   my $class = shift;
   my $self = bless { }, $class;
   return $self->init(@_);
 }
 
-sub init {
+sub init
+{
   my $self = shift;
   my %arg  = @_;
   my $pkg  = __PACKAGE__;
@@ -71,30 +77,31 @@ sub init {
 }
 
 
-sub _login {
+sub login
+{
   my $self = shift;
 
-  if (!$self->loggedin) {
-    my $csrf_param;
+  if (!$self->loggedin)
+  {
     my $sign_in_page = $self->ua->get( $self->pod.'/users/sign_in' )->decoded_content()
       or croak "Could not connect to " . $self->pod . ": $!";
 
     $sign_in_page =~ m/"csrf-param" content="([^"]+)"/ or croak "Could not find csrf-param on loginpage of " . $self->pod;
-    $csrf_param = decode_entities($1);
+    $self->csrfparam( decode_entities($1) );
     $sign_in_page =~ m/"csrf-token" content="([^"]+)"/ or croak "Could not find csrf-token on loginpage of " . $self->pod;
-    $self->csrftoken(decode_entities($1));
+    $self->csrftoken( decode_entities($1) );
 
     my $request = HTTP::Request->new( 'POST', $self->pod.'/users/sign_in' );
     $request->header( 'Connection' => 'keep-alive' );
     $request->header( 'Content-Type' => 'application/x-www-form-urlencoded' );
 
     my %plist = (
-	         utf8                    => '%E2%9C%93',
-	         uri_escape($csrf_param) => uri_escape($self->csrftoken),
-	         'user%5Busername%5D'    => $self->user,
-	         'user%5Bpassword%5D'    => uri_escape($self->passwd),
-	         'user%5Bremember_me%5D' => 0,
-	         commit                  => 'Sign in'
+	         uri_escape('utf8')               => uri_escape('&#x2713;'),
+	         uri_escape($self->csrfparam)     => uri_escape($self->csrftoken),
+	         uri_escape('user[username]')     => uri_escape($self->user),
+	         uri_escape('user[password]')     => uri_escape($self->passwd),
+	         uri_escape('user[remember_me]')  => uri_escape(0),
+	         uri_escape('commit')             => uri_escape('Sign in')
 	        );
 
     my $post = join '&', map { join '=', ($_, $plist{$_}) } keys %plist;
@@ -108,57 +115,28 @@ sub _login {
   }
 }
 
-sub _logout {
-  my $self = shift;
-  my $request = HTTP::Request->new( 'GET', $self->pod.'/users/sign_out' );
-  $request->header( 'Connection' => 'keep-alive' );
-  my $res = $self->ua->request( $request ) or croak "Could not logout from " . $self->pod . ": $!" ;
-  if(! $res->code == 302) {
-    croak "Could not logout from " . $self->pod . ": " . $res->status_line ;
-  }
-  $self->loggedin(0);
-}
-
-sub logout {
-  my $self = shift;
-
-  if ($self->loggedin) {
-    return $self->_logout;
-  }
-  else {
-    return;
-  }
-}
-
-sub post
+sub logout
 {
   my $self = shift;
-  my %arg  = @_;
 
-  $self->_login();
-
-  my $json = JSON->new->allow_nonref;
-  if(! utf8::is_utf8($arg{message}))
+  if( $self->loggedin )
   {
-    $json = $json->utf8(0);
+    my $request = HTTP::Request->new( 'GET', $self->pod.'/users/sign_out' );
+    $request->header( 'Connection' => 'keep-alive' );
+    my $res = $self->ua->request( $request ) or croak "Could not logout from " . $self->pod . ": $!" ;
+    if(! $res->code == 302) {
+      croak "Could not logout from " . $self->pod . ": " . $res->status_line ;
+    }
+    $self->loggedin(0);
   }
-
-  my $json_message = $json->encode($arg{message});
-
-  my $request = HTTP::Request->new( 'POST', $self->pod . $arg{uri} );
-  $request->header( 'Content-Type' => 'application/json; charset=UTF-8' );
-  $request->header( 'Connection'   => 'keep-alive' );
-  $request->header( 'X-CSRF-Token' => $self->csrftoken );
-  $request->content( $json_message );
-  $self->ua->request( $request ) or die "POST request failed: " . $self->pod . "$arg{uri}: $!";
 }
 
-sub get
+sub _get
 {
   my $self = shift;
   my %arg  = @_;
 
-  $self->_login();
+  $self->login();
 
   my $request = HTTP::Request->new( 'GET', $self->pod . $arg{uri} );
   $request->header( 'Accept'        => 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8' );
@@ -177,6 +155,32 @@ sub get
   }
 }
 
+sub post_message
+{
+  my $self = shift;
+  my $content = shift;
+  my @aspects = @_;
+
+  $self->login();
+
+  my $message = { status_message => { text => $content }, aspect_ids => @aspects };
+
+  my $json = JSON->new->allow_nonref;
+  if( !utf8::is_utf8( $message ) )
+  {
+    $json = $json->utf8(0);
+  }
+
+  my $json_message = $json->encode( $message );
+
+  my $request = HTTP::Request->new( 'POST', $self->pod.'/status_messages' );
+  $request->header( 'Content-Type' => 'application/json; charset=UTF-8' );
+  $request->header( 'Connection'   => 'keep-alive' );
+  $request->header( 'X-CSRF-Token' => $self->csrftoken );
+  $request->content( $json_message );
+  $self->ua->request( $request ) or die "POST request failed: ".$self->pod."/status_messages: $!";
+}
+
 sub get_contacts
 {
   my $self = shift;
@@ -184,19 +188,113 @@ sub get_contacts
   my $counter = 1;
   my $last;
 
-  $self->_login();
+  $self->login();
 
   do
   {
     $last = @contacts;
-    my $html = $self->get( uri => '/contacts?set=all&page='.$counter++ );
+    my $html = $self->_get( uri => '/contacts?set=all&page='.$counter++ );
     $html =~ s/[\n\r]//mg;
 
     my $regex = qr/${\(PATTERN_CONTACT)}/;
-    push @contacts, { "short_name" => $1, "user_id" => $2, "diaspora_id" => $3 } while $html =~ /$regex/g;
+    push @contacts, { "short_name" => $1, "user_id" => $2, "handle" => $3 } while $html =~ /$regex/g;
   }
   while( $last < @contacts );
   return @contacts;
+}
+
+sub get_aspects
+{
+  my $self = shift;
+  my @aspects;
+
+  $self->login();
+
+  # Get array of all aspect ids
+  my $html = $self->_get( uri => '/contacts' );
+  $html =~ s/[\n\r]//mg;
+  my $regex = qr/${\(PATTERN_ASPECT)}/;
+  push @aspects, { "aspect_id" => $1, "name" => $2, "user_ids" => [] } while $html =~ /$regex/g;
+
+  for my $aspect ( @aspects )
+  {
+    my $user_ids = $aspect->{user_ids};
+    $html = $self->_get( uri => '/contacts?a_id='.$aspect->{aspect_id} );
+    $html =~ s/[\n\r]//mg;
+
+    my $regex = qr/${\(PATTERN_ASPECT_CONTACT)}/;
+    push @$user_ids, $1 while $html =~ /$regex/g;
+  }
+  return @aspects;
+}
+
+# Max 20 chars
+sub create_aspect
+{
+  my $self = shift;
+  my $name = shift;
+  $self->login();
+  
+  my $request = HTTP::Request->new( 'POST', $self->pod.'/aspects' );
+  $request->header( 'Connection' => 'keep-alive' );
+  $request->header( 'Content-Type' => 'application/x-www-form-urlencoded' );
+
+  my %plist = (
+                uri_escape('utf8')                      => uri_escape('&#x2713;'),
+                uri_escape($self->csrfparam)            => uri_escape($self->csrftoken),
+                uri_escape('aspect[name]')              => uri_escape($name),
+                uri_escape('aspect[contacts_visible]')  => uri_escape(0),
+                uri_escape('commit')                    => uri_escape('Create')
+              );
+
+  my $post = join '&', map { join '=', ($_, $plist{$_}) } keys %plist;
+
+  $request->content( $post );
+  $self->ua->request( $request ) or croak "Could not create aspect: $!";
+}
+
+sub delete_aspect
+{
+  my $self = shift;
+  my $aspect_id = shift;
+
+  $self->login();
+
+  my $request = HTTP::Request->new( 'POST', $self->pod.'/aspects/'.$aspect_id );
+  $request->header( 'Content-Type' => 'application/x-www-form-urlencoded' );
+  $request->header( 'Connection'   => 'keep-alive' );
+  $request->content( '_method=delete&authenticity_token='.$self->csrftoken );
+  $self->ua->request( $request ) or die "POST request failed: ";
+}
+
+sub add_user_to_aspect
+{
+  my $self = shift;
+  my $user_id = shift;
+  my $aspect_id = shift;
+  
+  $self->login();
+  
+  my $request = HTTP::Request->new( 'POST', $self->pod.'/aspect_memberships?aspect_id='.$aspect_id.'&person_id='.$user_id );
+  $request->header( 'Connection' => 'keep-alive' );
+  $request->header( 'X-CSRF-Token' => $self->csrftoken );  
+  $request->header( 'Content-Length' => '0' );
+  $self->ua->request( $request ) or croak "Could not add user to aspect: $!";
+}
+
+sub remove_user_from_aspect
+{
+  my $self = shift;
+  my $user_id = shift;
+  my $aspect_id = shift;
+  
+  $self->login();
+  
+  my $request = HTTP::Request->new( 'POST', $self->pod.'/aspect_memberships/42?aspect_id='.$aspect_id.'&person_id='.$user_id );
+  $request->header( 'Connection' => 'keep-alive' );
+  $request->header( 'Content-Type' => 'application/x-www-form-urlencoded' );
+  $request->content( '_method=delete&authenticity_token='.$self->csrftoken );
+  $self->ua->request( $request ) or croak "Could not add user to aspect: $!";
 }
 
 sub get_conversations
@@ -206,19 +304,74 @@ sub get_conversations
   my $counter = 1;
   my $last;
 
-  $self->_login();
+  $self->login();
 
   do
   {
     $last = @conversations;
-    my $html = $self->get( uri => '/conversations?page='.$counter++ );
+    my $html = $self->_get( uri => '/conversations?page='.$counter++ );
     $html =~ s/[\n\r]//mg;
-
     my $regex = qr/${\(PATTERN_CONVERSATION)}/;
-    push @conversations, { "id" => $1, "from" => $2, "subject" => $3 } while $html =~ /$regex/g;
+
+    while( $html =~ /$regex/g )
+    {
+      my $msg_id  = $1;
+      my $from_id = $2;
+      my $subject = $3;
+
+      my @messages;
+      my $message = $self->_get( uri => '/conversations/'.$msg_id );
+      $message =~ s/[\n\r]//mg;
+      my $regex = qr/${\(PATTERN_MESSAGE)}/;
+
+      while( $message =~ /$regex/g )
+      {
+        push @messages, { "user_id" => $1, "message" => $2 };
+      }
+      push @conversations, { "conversation_id" => $msg_id, "from_user_id" => $from_id, "subject" => $subject, "messages" => \@messages };
+    }
   }
   while( $last < @conversations );
   return @conversations;
+}
+
+sub reply_conversation
+{
+  my $self = shift;
+  my $conversation_id = shift;
+  my $message = shift;
+
+  $self->login();
+  
+  my $request = HTTP::Request->new( 'POST', $self->pod.'/conversations/'.$conversation_id.'/messages' );
+  $request->header( 'Connection' => 'keep-alive' );
+  $request->header( 'Content-Type' => 'application/x-www-form-urlencoded' );
+
+  my %plist = (
+                uri_escape('utf8')            => uri_escape('&#x2713;'),
+                uri_escape($self->csrfparam)  => uri_escape($self->csrftoken),
+                uri_escape('message[text]')   => uri_escape($message),
+                uri_escape('commit')          => uri_escape('Reply')
+              );
+
+  my $post = join '&', map { join '=', ($_, $plist{$_}) } keys %plist;
+
+  $request->content( $post );
+  $self->ua->request( $request ) or croak "Could not reply to conversation: $!" ;
+}
+
+sub delete_conversation
+{
+  my $self = shift;
+  my $msg_id = shift;
+
+  $self->login();
+
+  my $request = HTTP::Request->new( 'POST', $self->pod.'/conversations/'.$msg_id.'/visibility');
+  $request->header( 'Content-Type' => 'application/x-www-form-urlencoded' );
+  $request->header( 'Connection'   => 'keep-alive' );
+  $request->content( '_method=delete&authenticity_token='.$self->csrftoken );
+  $self->ua->request( $request ) or die "POST request failed: ";
 }
 
 
