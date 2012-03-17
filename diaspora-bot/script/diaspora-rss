@@ -12,13 +12,12 @@ use XML::Feed;
 use Digest::MD5 qw(md5 md5_hex md5_base64);
 use Config::Tiny;
 use Getopt::Long;
-use DBI;
 use utf8;
 
 # tmp test
 use Encode;
 
-use Diaspora::Bot::Feed;
+use Diaspora::RSSBot;
 
 our $VERSION = '0.03';
 
@@ -43,29 +42,36 @@ GetOptions (
   "version|v!"   => \$version,
 ) or &usage;
 
-if($version) {
+if($version)
+{
   print "${daemonName} version ${VERSION}\n";
   exit;
 }
 
-if($help) {
+if($help)
+{
   &usage;
 }
 
-if(! $cfgfile ) {
-  foreach my $file (@cfgsearch) {
-    if( -e $file ) {
+if(! $cfgfile )
+{
+  foreach my $file (@cfgsearch)
+  {
+    if( -e $file )
+    {
       $cfgfile = $file;
       last;
     }
   }
-  if(! $cfgfile ) {
+  if(! $cfgfile )
+  {
     print STDERR "No config file found in @cfgsearch!\n";
     exit 1;
   }
 }
 
-if(! ($config = Config::Tiny->read( $cfgfile ))) {
+if(! ($config = Config::Tiny->read( $cfgfile )))
+{
   print STDERR "Could not open config $cfgfile: $!\n";
   exit 1;
 }
@@ -79,10 +85,9 @@ $logfile ||= $config->{main}->{logfile};
 $logfile ||= "/tmp/${daemonName}.log";
 $db      ||= $config->{main}->{database};
 
-my $dbh = &preparedb( "feeds" );
 
-
-if(! $debug) {
+if(! $debug)
+{
   chdir '/';
   umask 0;
   close STDIN;
@@ -106,17 +111,20 @@ if(! $debug) {
   $pidfile->write or die "Can't write PID file: $!";
 }
 
-sub signalHandler {
+sub signalHandler
+{
   $dieNow = 1;
 }
 
-sub wchild {
+sub wchild
+{
   my $waitedpid = wait;
   $SIG{CHLD} = \&wchild;
   $waitedpid = 0;
 }
 
-sub logEntry {
+sub printlog
+{
   my ($logText) = @_;
   my ($sec, $min, $hour, $mday, $mon, $year, $wday, $yday, $isdst) = localtime(time);
   my $dateTime = sprintf "%4d-%02d-%02d %02d:%02d:%02d", $year + 1900, $mon + 1, $mday, $hour, $min, $sec;
@@ -137,7 +145,7 @@ sub handleFeed
     my $title   = $feedcache{$item_guid}{title};
     my $content = $feedcache{$item_guid}{content};
 
-    logEntry( "NEW ITEM [$urls[0] -> \"".$title."\" tags: $tagstr]" );
+    printlog( "NEW ITEM [$urls[0] -> \"".$title."\" tags: $tagstr]" );
     $diaspora->postfeed(tags => [ @tags, 'rss-all'] , aspect => 'public', link => $link, title => $title, body => $content, uri => $urls[0]);
   }
 
@@ -180,139 +188,114 @@ Version $VERSION.
   exit;
 }
 
-$diaspora = Diaspora::Bot::Feed->new(pod => $pod, user => $user, passwd => $passwd);
+my $rssbot = Diaspora::RSSBot->new( pod => $pod, user => $user, passwd => $passwd, db => $db );
 
 
 ###############################################################################
 ### MAIN LOOP
 ###############################################################################
-until( $dieNow ) {
-  eval {
+until( $dieNow )
+{
+  eval
+  {
     # Reread config every iteration in order to incorporate new feeds and delete removed feeds from cache
-    if(! ($config = Config::Tiny->read( $cfgfile ))) {
-      logEntry("Diaspora* RSS BOT - failed to re-read the config $cfgfile: $!");
+    if(! ($config = Config::Tiny->read( $cfgfile )))
+    {
+      printlog("Diaspora* RSS BOT - failed to re-read the config $cfgfile: $!");
       exit 1;
     }
-    logEntry("Diaspora* RSS BOT - STARTED");
+    printlog("Diaspora* RSS BOT - STARTED");
 
-    &renametable( "feeds", "oldfeeds" );
-    &createtable( "feeds" );
-
-    if( $diaspora ) {
-      my %feedcache;
-
-      foreach my $tag ( keys %{$config->{feeds}} ) {
-        eval {
-          my $url = $config->{feeds}->{$tag};
-          my $feed = XML::Feed->parse( URI->new( $url ) );
-
-          foreach my $item ( $feed->entries )
-          {
-            my $content = (defined $item->content->body) ? $item->content->body : (defined $item->summary->body) ? $item->summary->body : "";
-            my $title   = utf8::is_utf8($item->title) ? encode('utf8', $item->title)  : $item->title;
-            my $link    = utf8::is_utf8($item->link)  ? encode('utf8', $item->link)   : $item->link;
-            $content    = utf8::is_utf8($content)     ? encode('utf8', $content)      : $content;
-
-            my $item_guid = md5_hex( $title.$content );
-            $feedcache{$item_guid}{title}   = $title;
-            $feedcache{$item_guid}{content} = $content;
-            $feedcache{$item_guid}{link}    = $link;
-
-            push @{ $feedcache{$item_guid}{tags} }, $tag;
-						push @{ $feedcache{$item_guid}{urls} }, $url;
-          }
-          1;
-        }
-        or do {
-          logEntry( "ERROR: ".$@." -> Processing next item" );
-          next;
-        }
-      }  
-
-      # Iterate all feeds and only post new items
-      foreach my $item_guid ( keys %feedcache ) {
-        eval {
-          handleFeed( $item_guid, %feedcache );
-          1;
-        }
-        or do {
-          logEntry( "ERROR: ".$@ );
-        }
-      }
-      $diaspora->logout;
-
-			&mergetable( "oldfeeds", "feeds" );
-			&cliptable( "feeds", values %{$config->{feeds}} );
-      &droptable( "oldfeeds" );
+    if( $rssbot )
+    {
+      $rssbot->login();
+      
+      $rssbot->process_user_tasks();
+      $rssbot->process_feeds();
+     
+      printlog( "Processing..." );
+      $rssbot->logout();
     }
-    logEntry("Diaspora* RSS BOT - STOPPED");  
+    printlog("Diaspora* RSS BOT - STOPPED");  
     1;  # Return true statement
   }
-  or do {
-    logEntry( "ERROR: ".$@ );
+  or do
+  {
+    printlog( "ERROR: ".$@ );
   };
 
   # Sleep until next update
   sleep( $sleep );
 }
 
-sub preparedb {
-  my ($table) = @_;
-  my $dbh  = DBI->connect("dbi:SQLite:$db") or die "Could not connect to sqlite db $db: $!\n";
-  my $sth  = $dbh->prepare( "CREATE TABLE IF NOT EXISTS $table (url varchar(255) NOT NULL, guid varchar(255) NOT NULL);" );
-  $sth->execute() or die "Could not create table for sqlite db $db: $!\n";
-  return $dbh;
-}
 
-sub insertitem {
-  my ($table, $url, $guid) = @_;
-  my $sth  = $dbh->prepare( "INSERT INTO $table VALUES(?,?);" );
-  $sth->execute($url, $guid) or die "Could not insert ($url, $guid) in table $table: $!\n";
-}
-
-sub itemexists {
-  my ($table, $guid) = @_;
-  my $sth  = $dbh->prepare( "SELECT * FROM $table WHERE guid = ?;" );
-  $sth->execute($guid) or die "Could not find $guid in table $table: $!\n";
-  my $row = $sth->fetchrow_hashref;
-  if($row) {
-    if(exists $row->{guid}) {
-      return 1;
-    }
-  }
-  else {
-    return 0;
-  }
-}
-
-sub createtable {
-  my ($table) = @_;
-  my $sth  = $dbh->prepare( "CREATE TABLE IF NOT EXISTS $table (url varchar(255) NOT NULL, guid varchar(255) NOT NULL);" );
-  $sth->execute() or die "Could not create table for sqlite db $db: $!\n";  
-}
-
-sub droptable {
-  my ($table) = @_;
-  my $sth  = $dbh->prepare( "DROP TABLE $table;" );
-  $sth->execute() or die "Could not delete table $table from sqlite db $db: $!\n";
-}
-
-sub renametable {
-  my ($oldname, $newname) = @_;
-  my $sth  = $dbh->prepare( "ALTER TABLE $oldname RENAME TO $newname;" );
-  $sth->execute() or die "Could not rename table $oldname to $newname from sqlite db $db: $!\n";
-}
-
-sub mergetable {
-	my ($old, $new) = @_;
-  my $sth  = $dbh->prepare( "INSERT INTO $new SELECT * FROM $old AS old WHERE NOT EXISTS (SELECT * FROM $new AS new WHERE new.url = old.url);" );
-  $sth->execute() or die "Could not merge $old with $new: $!\n";
-}
-
-sub cliptable {
-	my ($table, @urls) = @_;
-  my $params = join ',', map { "?" } @urls;
-  my $sth  = $dbh->prepare( "DELETE FROM $table WHERE url NOT IN ($params);" );
-  $sth->execute(@urls) or die "Could not clip $table: $!\n";
-}
+#until( $dieNow ) {
+#  eval {
+#    # Reread config every iteration in order to incorporate new feeds and delete removed feeds from cache
+#    if(! ($config = Config::Tiny->read( $cfgfile ))) {
+#      rpintlog("Diaspora* RSS BOT - failed to re-read the config $cfgfile: $!");
+#      exit 1;
+#    }
+#    printlog("Diaspora* RSS BOT - STARTED");
+#
+#    &renametable( "feeds", "oldfeeds" );
+#    &createtable( "feeds" );
+#
+#    if( $diaspora ) {
+#      my %feedcache;
+#
+#      foreach my $tag ( keys %{$config->{feeds}} ) {
+#        eval {
+#          my $url = $config->{feeds}->{$tag};
+#          my $feed = XML::Feed->parse( URI->new( $url ) );
+#
+#          foreach my $item ( $feed->entries )
+#          {
+#            my $content = (defined $item->content->body) ? $item->content->body : (defined $item->summary->body) ? $item->summary->body : "";
+#            my $title   = utf8::is_utf8($item->title) ? encode('utf8', $item->title)  : $item->title;
+#            my $link    = utf8::is_utf8($item->link)  ? encode('utf8', $item->link)   : $item->link;
+#            $content    = utf8::is_utf8($content)     ? encode('utf8', $content)      : $content;
+#
+#            my $item_guid = md5_hex( $title.$content );
+#            $feedcache{$item_guid}{title}   = $title;
+#            $feedcache{$item_guid}{content} = $content;
+#            $feedcache{$item_guid}{link}    = $link;
+#
+#            push @{ $feedcache{$item_guid}{tags} }, $tag;
+#						push @{ $feedcache{$item_guid}{urls} }, $url;
+#          }
+#          1;
+#        }
+#        or do {
+#          printlog( "ERROR: ".$@." -> Processing next item" );
+#          next;
+#        }
+#      }  
+#
+#      # Iterate all feeds and only post new items
+#      foreach my $item_guid ( keys %feedcache ) {
+#        eval {
+#          handleFeed( $item_guid, %feedcache );
+#          1;
+#        }
+#        or do {
+#          printlog( "ERROR: ".$@ );
+#        }
+#      }
+#      $diaspora->logout;
+#
+#			&mergetable( "oldfeeds", "feeds" );
+#			&cliptable( "feeds", values %{$config->{feeds}} );
+#      &droptable( "oldfeeds" );
+#    }
+#    printlog("Diaspora* RSS BOT - STOPPED");  
+#    1;  # Return true statement
+#  }
+#  or do {
+#    printlog( "ERROR: ".$@ );
+#  };
+#
+#  # Sleep until next update
+#  sleep( $sleep );
+#}
 

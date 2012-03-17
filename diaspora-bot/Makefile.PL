@@ -2,8 +2,8 @@ require 5.004;
 use ExtUtils::MakeMaker;
 
 WriteMakefile(
-              'NAME'         => 'Diaspora::Bot',
-              'VERSION_FROM' => 'lib/Diaspora/Bot.pm',
+              'NAME'         => 'Diaspora::Client',
+              'VERSION_FROM' => 'lib/Diaspora/Client.pm',
               'PREREQ_PM'    => {
 				 'File::Pid' => 0,
 				 'XML::FeedPP' => 0,
@@ -26,4 +26,5 @@ WriteMakefile(
                                  FILES => 't/*.out *~ */*~ */*/*~ */*/*/*~'
                                 },
 
-);
+)
+

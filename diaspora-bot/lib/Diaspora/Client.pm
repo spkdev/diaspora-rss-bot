@@ -1,4 +1,4 @@
-package Diaspora::Bot;
+package Diaspora::Client;
 
 use strict;
 use warnings;
@@ -42,7 +42,7 @@ foreach my $flag (keys %flags) {
 sub new
 {
   my $class = shift;
-  my $self = bless { }, $class;
+  my $self = bless {}, $class;
   return $self->init(@_);
 }
 
@@ -52,19 +52,26 @@ sub init
   my %arg  = @_;
   my $pkg  = __PACKAGE__;
 
-  foreach my $flag (keys %arg) {
-    if (! exists $flags{$flag}) {
+  foreach my $flag (keys %arg)
+  {
+    if( !exists $flags{$flag} )
+    {
       croak "$flag is no valid param for $pkg!";
     }
-    else {
+    else
+    {
       $self->$flag($arg{$flag});
     }
   }
-  foreach my $flag (keys %flags) {
-    if ($flags{$flag} && ! exists $arg{$flag}) {
+
+  foreach my $flag (keys %flags)
+  {
+    if( $flags{$flag} && !exists $arg{$flag} )
+    {
       croak "missing required $flag param!";
     }
-    elsif(! exists $arg{$flag}) {
+    elsif( !exists $arg{$flag} )
+    {
       $self->{$flag} = $flags{$flag};
     }
   }
@@ -76,13 +83,13 @@ sub init
   return $self;
 }
 
-
 sub login
 {
   my $self = shift;
 
   if (!$self->loggedin)
   {
+    $self->ua->cookie_jar->clear();
     my $sign_in_page = $self->ua->get( $self->pod.'/users/sign_in' )->decoded_content()
       or croak "Could not connect to " . $self->pod . ": $!";
 
@@ -108,7 +115,8 @@ sub login
 
     $request->content( $post );
     my $res = $self->ua->request( $request ) or croak "Could not login to " . $self->pod . ": $!" ;
-    if(! $res->code == 302) {
+    if(! $res->code == 302)
+    {
       croak "Could not login to " . $self->pod . ": " . $res->status_line ;
     }
     $self->loggedin(1);
@@ -250,7 +258,9 @@ sub create_aspect
   my $post = join '&', map { join '=', ($_, $plist{$_}) } keys %plist;
 
   $request->content( $post );
-  $self->ua->request( $request ) or croak "Could not create aspect: $!";
+  my $redirect = $self->ua->request( $request )->header( "Location" ) or croak "Could not create aspect: $!";
+  $redirect =~ m/.+?a_id=(.+)/;
+  return $1;  # Return id of created aspect, for convenience
 }
 
 sub delete_aspect
@@ -263,7 +273,7 @@ sub delete_aspect
   my $request = HTTP::Request->new( 'POST', $self->pod.'/aspects/'.$aspect_id );
   $request->header( 'Content-Type' => 'application/x-www-form-urlencoded' );
   $request->header( 'Connection'   => 'keep-alive' );
-  $request->content( '_method=delete&authenticity_token='.$self->csrftoken );
+  $request->content( '_method=delete&authenticity_token='.uri_escape( $self->csrftoken ) );
   $self->ua->request( $request ) or die "POST request failed: ";
 }
 
@@ -293,7 +303,7 @@ sub remove_user_from_aspect
   my $request = HTTP::Request->new( 'POST', $self->pod.'/aspect_memberships/42?aspect_id='.$aspect_id.'&person_id='.$user_id );
   $request->header( 'Connection' => 'keep-alive' );
   $request->header( 'Content-Type' => 'application/x-www-form-urlencoded' );
-  $request->content( '_method=delete&authenticity_token='.$self->csrftoken );
+  $request->content( '_method=delete&authenticity_token='.uri_escape( $self->csrftoken ) );
   $self->ua->request( $request ) or croak "Could not add user to aspect: $!";
 }
 
@@ -326,7 +336,7 @@ sub get_conversations
 
       while( $message =~ /$regex/g )
       {
-        push @messages, { "user_id" => $1, "message" => $2 };
+        push @messages, { "user_id" => $1, "content" => $2 };
       }
       push @conversations, { "conversation_id" => $msg_id, "from_user_id" => $from_id, "subject" => $subject, "messages" => \@messages };
     }
@@ -370,10 +380,9 @@ sub delete_conversation
   my $request = HTTP::Request->new( 'POST', $self->pod.'/conversations/'.$msg_id.'/visibility');
   $request->header( 'Content-Type' => 'application/x-www-form-urlencoded' );
   $request->header( 'Connection'   => 'keep-alive' );
-  $request->content( '_method=delete&authenticity_token='.$self->csrftoken );
+  $request->content( '_method=delete&authenticity_token='.uri_escape( $self->csrftoken ) );
   $self->ua->request( $request ) or die "POST request failed: ";
 }
-
 
 sub _escapeString
 {
@@ -397,14 +406,14 @@ sub _escapeMarkup
 
 =head1 NAME
 
-Diaspora::Bot - A perl interface to the diaspora social network.
+Diaspora::Client - A perl interface to the diaspora social network.
 
 =head1 SYNOPSIS
 
- use Diaspora::Bot;
- my $d = Diaspora::Bot->new(
+ use Diaspora::Client;
+ my $d = Diaspora::Client->new(
                              pod    => 'https://foo.bar',
-                             user   => 'yourbot',
+                             user   => 'username',
                              passwd => 'secret'
                            );
  $d->post(
@@ -419,7 +428,7 @@ Diaspora::Bot - A perl interface to the diaspora social network.
 
 =head1 DESCRIPTION
 
-B<This document describes Diaspora::Bot version 0.01.>
+B<This document describes Diaspora::Client version 0.01.>
 
 Diaspora* is a federated social network. This module
 provides an API to access diaspora by using perl using
