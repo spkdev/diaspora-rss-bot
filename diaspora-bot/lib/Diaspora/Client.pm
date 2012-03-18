@@ -4,7 +4,6 @@ use strict;
 use warnings;
 use vars qw($VERSION @ISA);
 use Carp;
-
 use LWP::UserAgent;
 use HTML::Entities;
 use URI::Escape;
