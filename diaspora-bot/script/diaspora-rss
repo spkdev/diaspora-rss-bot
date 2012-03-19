@@ -20,20 +20,21 @@ my $dieNow          = 0;
 my $sleep           = 300;
 
 my @cfgsearch       = ("$ENV{HOME}/.${daemonName}", "/etc/${daemonName}.conf", "/usr/local/etc/${daemonName}.conf");
-my ($db, $config, $cfgfile, $debug, $pod, $user, $passwd, $logfile, $pidfile, $help, $version, $diaspora );
+my ($db, $config, $cfgfile, $debug, $pod, $user, $passwd, $logfile, $pidfile, $help, $version, $diaspora, $keepold);
 
 Getopt::Long::Configure( qw(no_ignore_case));
 GetOptions (
-  "config|c=s"   => \$cfgfile,
-  "debug|d!"     => \$debug,
-  "pod|p=s"      => \$pod,
-  "user|u=s"     => \$user,
-  "passwd|P=s"   => \$passwd,
-  "log|l=s"      => \$logfile,
-  "pidfile|f=s"  => \$pidfile,
-  "database|D=s" => \$db,
-  "help|h|?!"    => \$help,
-  "version|v!"   => \$version,
+  "config|c=s"    => \$cfgfile,
+  "debug|d!"      => \$debug,
+  "pod|p=s"       => \$pod,
+  "user|u=s"      => \$user,
+  "passwd|P=s"    => \$passwd,
+  "log|l=s"       => \$logfile,
+  "pidfile|f=s"   => \$pidfile,
+  "database|D=s"  => \$db,
+  "keepold"       => \$keepold,
+  "help|h|?!"     => \$help,
+  "version|v!"    => \$version,
 ) or &usage;
 
 if( $version )
@@ -78,6 +79,8 @@ $pidfile ||= "/tmp/${daemonName}.pid";
 $logfile ||= $config->{main}->{logfile};
 $logfile ||= "/tmp/${daemonName}.log";
 $db      ||= $config->{main}->{database};
+$keepold ||= $config->{main}->{keepold};
+$keepold ||= 30;
 
 
 if( !$debug )
@@ -145,6 +148,8 @@ Options:
                                (default: /tmp/${daemonName}.pid)
 -l <file> | --logfile=<file>   store log messages to <file>.
                                (default: /tmp/${daemonName}.log)
+-k <days> | --keepold=<days>   how many days to remember old entries.
+
                                
 Config file (if not specified via commandline) might be located in one of the
 following locations. $0 looks for them in this order:
@@ -182,6 +187,7 @@ until( $dieNow )
       $rssbot->login();
       $rssbot->process_user_tasks();
       $rssbot->process_feeds();
+      $rssbot->purge_feeds( $keepold );
       $rssbot->logout();
     }
     printlog("Diaspora* RSS BOT - STOPPED");  

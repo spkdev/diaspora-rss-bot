@@ -84,6 +84,7 @@ sub process_feeds
   
   my $st_get_feed = $self->{db}->prepare( "SELECT * FROM feeds;" );
   my $st_get_processed = $self->{db}->prepare( "SELECT * FROM processed WHERE guid=?;" );
+  my $st_ins_processed = $self->{db}->prepare( "INSERT INTO processed VALUES( ?, ?, ? );" );
   my @aspects = $self->{diaspora}->get_aspects();
 
   $st_get_feed->execute();
@@ -121,7 +122,7 @@ sub process_feeds
 
             my $message = $self->_format_message( $feed_url, $link, $title, $content );
             $self->{diaspora}->post_message( $message, [$aspect->{aspect_id}] );
-            $self->{db}->do( "INSERT INTO processed VALUES( $fi->{guid}, \"$guid\", datetime('now') );" );
+            $st_ins_processed->execute( $fi->{guid}, $guid, time );
           }
         }
         1;
@@ -133,15 +134,20 @@ sub process_feeds
       }
     }  
   }
+}
 
-# TODO: Purge old feeds
+sub purge_feeds
+{
+  my $self = shift;
+  my $days = shift;
+  my $t = time - ($days * 86400);
+  $self->{db}->do( "DELETE FROM processed WHERE timestamp < ?" );
 }
 
 sub _handle_help
 {
   my $self = shift;
   my $pm = shift;
-
   $self->{diaspora}->reply_conversation( $pm->{conversation_id}, HELP_MESSAGE );
   $self->{diaspora}->delete_conversation( $pm->{conversation_id} );
 }
@@ -285,12 +291,12 @@ sub _handle_unsubscribe
   if( ($#removed + 1) > 0 )
   {
     $response = $response."\n\nYou have been removed from the following feeds:\n\n";
-    foreach ( @removed ) { $response = $response."+ $_\n"; }
+    foreach( @removed ) { $response = $response."+ $_\n"; }
   }
   if( ($#error + 1) > 0 )
   {
     $response = $response."\n\nYou are not subscribed to the following feeds, but attempted to be removed:\n\n";
-    foreach ( @error ) { $response = $response."+ $_\n"; }
+    foreach( @error ) { $response = $response."+ $_\n"; }
   }
 
   $self->{diaspora}->reply_conversation( $pm->{conversation_id}, $response );
@@ -302,7 +308,36 @@ sub _handle_list
   my $self = shift;
   my $pm = shift;
  
-  $self->{diaspora}->reply_conversation( $pm->{conversation_id}, "Not yet implemented" );
+  my @aspects = $self->{diaspora}->get_aspects();
+  my @subscribed;
+
+
+  my $st_get_feed = $self->{db}->prepare( "SELECT * FROM feeds WHERE guid=?;" );
+  foreach( @aspects )
+  {
+    if( any { $_ eq $pm->{from_user_id} } @{$_->{user_ids}} )
+    {
+      $st_get_feed->execute( $_->{name} );
+      my $feed = $st_get_feed->fetchrow_hashref();
+      if( $feed )
+      {
+        push( @subscribed, $feed->{url} );
+      }
+    }
+  }
+
+  my $response;
+  if( ($#subscribed + 1) > 0 )
+  {
+    $response = "You are subscribed to the following feeds:\n\n";
+    foreach( @subscribed ) { $response = $response."+ $_\n"; }
+  }
+  else
+  {
+    $response = "You are not subscribed to any feed.";
+  }
+
+  $self->{diaspora}->reply_conversation( $pm->{conversation_id}, $response );
   $self->{diaspora}->delete_conversation( $pm->{conversation_id} );
 }
 
@@ -310,7 +345,7 @@ sub _handle_invalid
 {
   my $self = shift;
   my $pm = shift;
-
+  
   my $message = "**Your request is invalid, please refer to the help to see what commands are currently supported:**\n\n".HELP_MESSAGE;
   $self->{diaspora}->reply_conversation( $pm->{conversation_id}, $message );
   $self->{diaspora}->delete_conversation( $pm->{conversation_id} );
@@ -365,7 +400,7 @@ sub _db_prepare
   $sth->execute() or die "Could not create table 'feeds' for sqlite db $self->{db_path}: $!\n";
 
   # Create table 'processed'
-  $sth = $self->{db}->prepare( "CREATE TABLE IF NOT EXISTS processed (feed INTEGER, guid varchar(255) NOT NULL, timestamp DATETIME);" );
+  $sth = $self->{db}->prepare( "CREATE TABLE IF NOT EXISTS processed (feed INTEGER, guid varchar(255) NOT NULL, timestamp integer(32) NOT NULL);" );
   $sth->execute() or die "Could not create table 'processed' for sqlite db $self->{db_path}: $!\n";
 }
 
