@@ -44,7 +44,22 @@ sub init
   $self->{db_path}    = $args{db_path};
   $self->{failcount}  = $args{failcount};
   $self->{diaspora}   = Diaspora::Client->new( pod => $args{pod}, user => $args{user}, passwd => $args{passwd} );
+  $self->{aspect_all} = undef;
   $self->_db_prepare();
+
+  $self->login();
+  my @aspects = $self->{diaspora}->get_aspects();
+  foreach( @aspects )
+  {
+    if( $_->{name} eq "all" )
+    {
+      $self->{aspect_all} = $_;
+      last;
+    }
+  }
+  $self->logout();
+  die "No aspect 'all' defined" if !$self->{aspect_all};
+
   return $self;
 }
 
@@ -63,8 +78,17 @@ sub logout
 sub process_requests
 {
   my $self = shift;
+  my @contacts = $self->{diaspora}->get_contacts();
   my @requests = sort cmp_requests $self->{diaspora}->get_conversations(); 
-  
+
+  foreach( @contacts )
+  {
+    if( $_->{only_sharing} )
+    {
+      $self->{diaspora}->add_user_to_aspect( $_->{user_id}, $self->{aspect_all}->{aspect_id} );
+    }
+  }
+
   foreach( @requests )
   {
     switch( $_->{subject} )

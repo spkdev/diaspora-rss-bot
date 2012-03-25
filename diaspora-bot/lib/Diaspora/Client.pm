@@ -15,7 +15,7 @@ our $VERSION = '0.03';
 our %flags   = qw(pod 1 user 1 passwd 1 csrfparam 0 csrftoken 0 ua 0 wc 0 loggedin 0);
 
 # Constant regex patterns used for parsing the html responses
-use constant PATTERN_CONTACT        => "data-person-short-name='(.+?)' data-person_id='(.+?)'.+?<a href=\"(.+?)\".+?<div class='info'>(.+?)</div>";
+use constant PATTERN_CONTACT        => "<div class='button (.*?)toggle'>.+?data-person-short-name='(.+?)' data-person_id='(.+?)'.+?<a href=\"(.+?)\".+?<div class='info'>(.+?)</div>";
 use constant PATTERN_CONTACT_ID     => "contact_id=([0-9]+)";
 use constant PATTERN_ASPECT         => "data-aspect_id='(.+?)'><a class='aspect_selector' href=.+?>(.+?)<div class='contact_count'>";
 use constant PATTERN_ASPECT_CONTACT => "<img alt=.+?class=\"avatar\" data-person_id=\"(.+?)\" src=.+? title=.+?>";
@@ -193,6 +193,7 @@ sub post_message
 sub get_contacts
 {
   my $self = shift;
+  my @only_sharing;
   my @contacts;
   my $counter = 1;
   my $last;
@@ -205,7 +206,7 @@ sub get_contacts
     my $html = $self->_get( uri => '/contacts?set=all&page='.$counter++ );
     $html =~ s/[\n\r]//mg;
     my $regex = qr/${\(PATTERN_CONTACT)}/;
-    push @contacts, { "short_name" => $1, "user_id" => $2, "contact_id" => $3, "handle" => $4 } while $html =~ /$regex/g;
+    push @contacts, { "short_name" => $2, "user_id" => $3, "contact_id" => $4, "handle" => $5, "only_sharing" =>  ($1 eq "") ? 1 : 0 } while $html =~ /$regex/g;
   }
   while( $last < @contacts );
 
