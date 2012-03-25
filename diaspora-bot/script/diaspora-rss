@@ -13,14 +13,13 @@ use Getopt::Long;
 use Diaspora::RSSBot;
 use utf8;
 
-our $VERSION = '0.03';
+our $VERSION = '0.10';
 
-my $daemonName      = "diaspora-rss";
-my $dieNow          = 0;
-my $sleep           = 300;
+my $daemon  = "diaspora-rss";
+my $quit    = 0;
 
-my @cfgsearch       = ("$ENV{HOME}/.${daemonName}", "/etc/${daemonName}.conf", "/usr/local/etc/${daemonName}.conf");
-my ($db, $config, $cfgfile, $debug, $pod, $user, $passwd, $logfile, $pidfile, $help, $version, $diaspora, $keepold);
+my @cfgsearch       = ("$ENV{HOME}/.$daemon", "/etc/$daemon.conf", "/usr/local/etc/$daemon.conf");
+my ($db, $config, $cfgfile, $debug, $pod, $user, $passwd, $logfile, $pidfile, $help, $version, $diaspora, $keepold, $failcount, $fetch, $request );
 
 Getopt::Long::Configure( qw(no_ignore_case));
 GetOptions (
@@ -32,14 +31,17 @@ GetOptions (
   "log|l=s"       => \$logfile,
   "pidfile|f=s"   => \$pidfile,
   "database|D=s"  => \$db,
-  "keepold"       => \$keepold,
+  "keepold|k=s"   => \$keepold,
+  "failcount|F=s" => \$failcount,
+  "fetch|e=s"     => \$fetch,
+  "request|r=s"   => \$request,
   "help|h|?!"     => \$help,
   "version|v!"    => \$version,
 ) or &usage;
 
 if( $version )
 {
-  print "${daemonName} version ${VERSION}\n";
+  print "$daemon version ${VERSION}\n";
   exit;
 }
 
@@ -71,16 +73,22 @@ if( !($config = Config::Tiny->read( $cfgfile )) )
   exit 1;
 }
 
-$pod     ||= $config->{main}->{pod};
-$user    ||= $config->{main}->{username};
-$passwd  ||= $config->{main}->{password};
-$pidfile ||= $config->{main}->{pidfile};
-$pidfile ||= "/tmp/${daemonName}.pid";
-$logfile ||= $config->{main}->{logfile};
-$logfile ||= "/tmp/${daemonName}.log";
-$db      ||= $config->{main}->{database};
-$keepold ||= $config->{main}->{keepold};
-$keepold ||= 30;
+$pod        ||= $config->{main}->{pod};
+$user       ||= $config->{main}->{username};
+$passwd     ||= $config->{main}->{password};
+$pidfile    ||= $config->{main}->{pidfile};
+$pidfile    ||= "/var/run/$daemon.pid";
+$logfile    ||= $config->{main}->{logfile};
+$logfile    ||= "/tmp/$daemon.log";
+$db         ||= $config->{main}->{database};
+$keepold    ||= $config->{main}->{keepold};
+$keepold    ||= 30;
+$failcount  ||= $config->{main}->{failcount};
+$failcount  ||= 50;
+$fetch      ||= $config->{main}->{fetch};
+$fetch      ||= 300;
+$request    ||= $config->{main}->{request};
+$request    ||= 60;
 
 
 if( !$debug )
@@ -110,7 +118,7 @@ if( !$debug )
 
 sub signalHandler
 {
-  $dieNow = 1;
+  $quit = 1;
 }
 
 sub wchild
@@ -136,27 +144,30 @@ $0 is a daemon which posts rss feeds to a diaspora account.
 Usage: $0 [-vhcdpuPD]
 
 Options:
--h --help                      print this usage text
--v --version                   print the program version
--c <file> | --config=<file>    use config file <file> instead of the default
--u <user> | --user=<user>      use <user> to login to diaspora
--P <pass> | --passwd=<pass>    use <pass> to login to diaspora
--p <pod>  | --pod=<pod>        use <pod> uri as diaspora pod
--d        | --debug            do not fork into background and print logs to stdout
--D <db>   | --database=<db>    use sqlite db <db> file to store feed information
--f <file> | --pidfile=<file>   store PID in the file <file>.
-                               (default: /tmp/${daemonName}.pid)
--l <file> | --logfile=<file>   store log messages to <file>.
-                               (default: /tmp/${daemonName}.log)
--k <days> | --keepold=<days>   how many days to remember old entries.
+-h --help                           print this usage text
+-v --version                        print the program version
+-c <file>     | --config=<file>     use config file <file> instead of the default
+-u <user>     | --user=<user>       use <user> to login to diaspora
+-P <pass>     | --passwd=<pass>     use <pass> to login to diaspora
+-p <pod>      | --pod=<pod>         use <pod> uri as diaspora pod
+-d            | --debug             do not fork into background and print logs to stdout
+-D <db>       | --database=<db>     use sqlite db <db> file to store feed information
+-f <file>     | --pidfile=<file>    store PID in the file <file>.
+                                    (default: /tmp/$daemon.pid)
+-l <file>     | --logfile=<file>    store log messages to <file>.
+                                    (default: /tmp/$daemon.log)
+-k <days>     | --keepold=<days>    how many days to remember old entries.
+-F <limit>    | --failcount=<limit> number of subsequent fails when tryinf to fetch a feed. If the limit is reached, the feed is purged from the system.
+-e <seconds>  | --fetch=<seconds>   number of seconds the bot at least waits between subsequent feed fetches.
+-r <seconds>  | --request=<seconds> number of seconds the bot at least waits between processing of user requests.
 
-                               
+
 Config file (if not specified via commandline) might be located in one of the
 following locations. $0 looks for them in this order:
 
-$ENV{HOME}/.${daemonName}
-/etc/${daemonName}.conf
-/usr/local/etc/${daemonName}.conf
+$ENV{HOME}/.$daemon
+/etc/$daemon.conf
+/usr/local/etc/$daemon.conf
 
 This is $0 by Oliver. Diaspora-ID: spektrum\@pod.fractal.bz.
 Version $VERSION.
@@ -164,41 +175,42 @@ Version $VERSION.
   exit;
 }
 
-my $rssbot = Diaspora::RSSBot->new( pod => $pod, user => $user, passwd => $passwd, db_path => $db );
-
+my $rssbot = Diaspora::RSSBot->new( pod => $pod, user => $user, passwd => $passwd, db_path => $db, failcount => $failcount );
+my $lastfetch = time - $fetch - 1;  # Subsctract sleeptime - 1 to trigger a fetch immediately after the script was started
 
 ###############################################################################
 ### MAIN LOOP
 ###############################################################################
-until( $dieNow )
+until( $quit )
 {
   eval
   {
-    # Reread config every iteration in order to incorporate new feeds and delete removed feeds from cache
-    if(! ($config = Config::Tiny->read( $cfgfile )))
-    {
-      printlog("Diaspora* RSS BOT - failed to re-read the config $cfgfile: $!");
-      exit 1;
-    }
-    printlog("Diaspora* RSS BOT - STARTED");
+    printlog( "Diaspora* RSS BOT - STARTED" );
 
     if( $rssbot )
-    {
+    { 
       $rssbot->login();
-      $rssbot->process_user_tasks();
-      $rssbot->process_feeds();
-      $rssbot->purge_feeds( $keepold );
+      printlog( "Processing requests" );
+      $rssbot->process_requests();
+
+      if( (time - $lastfetch) > $fetch )
+      {
+        printlog( "Fetching feeds" );
+        $rssbot->process_feeds();
+        $rssbot->purge_feeds( $keepold );
+        $lastfetch = time;
+      }
       $rssbot->logout();
     }
-    printlog("Diaspora* RSS BOT - STOPPED");  
     1;  # Return true statement
   }
   or do
   {
     printlog( "ERROR: ".$@ );
   };
+  printlog("Diaspora* RSS BOT - STOPPED");  
 
   # Sleep until next update
-  sleep( $sleep );
+  sleep( $request );  # Sleep a minute
 }
 

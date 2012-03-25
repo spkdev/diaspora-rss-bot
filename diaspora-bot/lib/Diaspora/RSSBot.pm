@@ -10,6 +10,7 @@ use DBI;
 use XML::Feed;
 use Digest::MD5 qw(md5 md5_hex md5_base64);
 use List::MoreUtils 'any';
+use HTML::Entities;
 use Encode;
 use utf8;
 
@@ -18,8 +19,7 @@ our %flags   = qw(pod 1 user 1 passwd 1);
 
 # Constants
 use constant PATTERN_HREF => "<a.+?href=\"([^\"]+?)\".+?</a>";
-use constant HELP_MESSAGE => "The rss-bot can be controlled with certain commands which are sent as private message. The command is always placed in the subject field of the message, while possible parameters are placed in the body. If a command has no parameters, you can put an arbitrary message into the body, as empty messages cannot be send. The rss-bot periodically processes commands at a certain frequency, so be patient as the response may take a few minutes.\n\nThe following commands a currently supported:\n\n**help**\nShows this help message which explains the usage. This command has no parameters.\n\n**subscribe**\nSubscribes you to the url(s) that are provided. Just paste one or more urls to RSS/Atom feeds into the message body, and rss-bot will subscribe you to those feeds right away.\n\n**unsubscribe**\nUnsubscribes you from the url(s) that are provided. Just paste one or more urls to RSS/Atom feeds that you no longer want to receive into the message body, and rss-bot will remove you from said feeds.";
-
+use constant HELP_MESSAGE => "The rss-bot can be controlled with certain commands which are sent as private message. The command is always placed in the subject field of the message, while possible parameters are placed in the body. If a command has no parameters, you can put an arbitrary message into the body, as empty messages cannot be send. The rss-bot periodically processes commands at a certain frequency, so be patient as the response may take a few minutes.\n\nThe following commands a currently supported:\n\n**help**\nShows this help message which explains the usage. This command has no parameters.\n\n**subscribe**\nSubscribes you to the url(s) that are provided. Just paste one or more urls to RSS/Atom feeds into the message body, and rss-bot will subscribe you to those feeds right away.\n\n**unsubscribe**\nUnsubscribes you from the url(s) that are provided. Just paste one or more urls to RSS/Atom feeds that you no longer want to receive into the message body, and rss-bot will remove you from said feeds.\n\n**list**\nSends you a list of all feeds you are currently subscribed to.";
 
 sub new
 {
@@ -35,13 +35,15 @@ sub init
   my $self = shift;
   my %args = @_;
 
-  if( !exists $args{pod}     )  { croak "Parameter 'pod' is missing";     }
-  if( !exists $args{user}    )  { croak "Parameter 'user' is missing";    }
-  if( !exists $args{passwd}  )  { croak "Parameter 'passwd' is missing";  }
-  if( !exists $args{db_path} )  { croak "Parameter 'db_path' is missing"; }
-  $self->{db}       = undef;
-  $self->{db_path}  = $args{db_path};
-  $self->{diaspora} = Diaspora::Client->new( pod => $args{pod}, user => $args{user}, passwd => $args{passwd} );
+  if( !exists $args{pod}       )  { croak "Parameter 'pod' is missing";       }
+  if( !exists $args{user}      )  { croak "Parameter 'user' is missing";      }
+  if( !exists $args{passwd}    )  { croak "Parameter 'passwd' is missing";    }
+  if( !exists $args{db_path}   )  { croak "Parameter 'db_path' is missing";   }
+  if( !exists $args{failcount} )  { croak "Parameter 'failcount' is missing"; }
+  $self->{db}         = undef;
+  $self->{db_path}    = $args{db_path};
+  $self->{failcount}  = $args{failcount};
+  $self->{diaspora}   = Diaspora::Client->new( pod => $args{pod}, user => $args{user}, passwd => $args{passwd} );
   $self->_db_prepare();
   return $self;
 }
@@ -58,12 +60,12 @@ sub logout
   $self->{diaspora}->logout();
 }
 
-sub process_user_tasks
+sub process_requests
 {
   my $self = shift;
-  my @conversations = $self->{diaspora}->get_conversations();
-
-  foreach (@conversations)
+  my @requests = sort cmp_requests $self->{diaspora}->get_conversations(); 
+  
+  foreach( @requests )
   {
     switch( $_->{subject} )
     {
@@ -78,11 +80,12 @@ sub process_user_tasks
 
 sub process_feeds
 {
-  my $self    = shift;
-  my $pm      = shift;
-  my $aspect  = undef;
-  
+  my $self      = shift;
+  my $pm        = shift;
+  my $aspect    = undef;
+
   my $st_get_feed = $self->{db}->prepare( "SELECT * FROM feeds;" );
+  my $st_set_failcount = $self->{db}->prepare( "UPDATE feeds SET failcount=? WHERE guid=?;" );
   my $st_get_processed = $self->{db}->prepare( "SELECT * FROM processed WHERE guid=?;" );
   my $st_ins_processed = $self->{db}->prepare( "INSERT INTO processed VALUES( ?, ?, ? );" );
   my @aspects = $self->{diaspora}->get_aspects();
@@ -105,6 +108,11 @@ sub process_feeds
       eval
       {
         my $feed = XML::Feed->parse( URI->new( $fi->{url} ) );
+
+        if( $fi->{failcount} > 0 )
+        {
+          $st_set_failcount->execute( 0, $fi->{guid} );
+        }
 
         foreach ( $feed->entries )
         {
@@ -129,7 +137,38 @@ sub process_feeds
       }
       or do
       {
-        print "ERROR while processing $fi->{url} -> Processing next feed\n";
+        $fi->{failcount} = $fi->{failcount} + 1;
+        if( $fi->{failcount} > $self->{failcount} )
+        {
+          # Limit reached -> delete feed and corresponding aspect
+          $self->{db}->do( "DELETE FROM feeds where guid=$fi->{guid};" );
+
+          my @contacts = $self->{diaspora}->get_contacts();
+          my @contact_ids;
+          foreach my $user ( @{$aspect->{user_ids}} )
+          {
+            foreach( @contacts )
+            {
+              if( $user eq $_->{user_id} )
+              {
+                push( @contact_ids, $_->{contact_id} ) if $_->{contact_id} ne "";
+              }
+            }
+          }
+          
+          my $message = "The following feed seems to be broken and has been purged from the system:\n\n+ $fi->{url}";
+          my $conversation_id = $self->{diaspora}->send_conversation( @contact_ids, "removed feed", $message );
+          $self->{diaspora}->delete_conversation( $conversation_id );
+          $self->{diaspora}->delete_aspect( $aspect->{aspect_id} );
+          print "ERROR while processing $fi->{url}. Failcount limit reached, feed removed -> Processing next feed\n";
+        }
+        else
+        {
+          # Increase failcount
+          $self->{db}->do( "UPDATE feeds SET failcount=$fi->{failcount} where guid=$fi->{guid};" );
+          $st_set_failcount->execute( $fi->{failcount}, $fi->{guid} );
+          print "ERROR while processing $fi->{url}. Failcount is now: $fi->{failcount} -> Processing next feed\n";
+        }
         next;
       }
     }  
@@ -141,7 +180,7 @@ sub purge_feeds
   my $self = shift;
   my $days = shift;
   my $t = time - ($days * 86400);
-  $self->{db}->do( "DELETE FROM processed WHERE timestamp < ?" );
+  $self->{db}->do( "DELETE FROM processed WHERE timestamp < $t" );
 }
 
 sub _handle_help
@@ -157,52 +196,48 @@ sub _handle_subscribe
   my $self = shift;
   my $pm = shift;
   my $params = @{$pm->{messages}}[0]->{content};
+  my @aspects = $self->{diaspora}->get_aspects();
   my @feeds;
   my @added;
 
   my $regex = qr/${\(PATTERN_HREF)}/;
-  push @feeds, $1 while $params =~ /$regex/g;
+  push @feeds, decode_entities( $1 ) while $params =~ /$regex/g;
 
-  my $st_add = $self->{db}->prepare( "INSERT INTO feeds VALUES( NULL, ? );" );
+  my $st_add = $self->{db}->prepare( "INSERT INTO feeds (url) VALUES( ? );" );
   my $st_get = $self->{db}->prepare( "SELECT * FROM feeds WHERE url=?;" );
 
   foreach ( @feeds )
   {
-    $_ =~ s/\/$//;  # Cut off possible trailing / in order to avoid false duplicates
+    $_ =~ s/\/$//;  # Cut off possible trailing / in order to reduce false duplicates
    
     $st_get->execute( $_ );
-    if( !$st_get->fetchrow_array() )
+    my $row = $st_get->fetchrow_hashref();
+    if( !$row )
     {
       $st_add->execute( $_ );
       $st_get->execute( $_ );
-      my $row = $st_get->fetchrow_hashref();
+      $row = $st_get->fetchrow_hashref();
       if( $row )
       {
         my $aspect_id = $self->{diaspora}->create_aspect( $row->{guid} );
         $self->{diaspora}->add_user_to_aspect( $pm->{from_user_id}, $aspect_id );
         push @added, $_;
+        @aspects = $self->{diaspora}->get_aspects();  # Update to reflect changes
       }
     }
     else
     {
-      $st_get->execute( $_ );
-      my $row = $st_get->fetchrow_hashref();
-      if( $row )
+      my $aspect;
+      foreach( @aspects )
       {
-        my $aspect;
-        my @aspects = $self->{diaspora}->get_aspects();
-        foreach ( @aspects )
+        if( $_->{name} eq $row->{guid} )
         {
-          if( $_->{name} eq $row->{guid} )
-          {
-            $aspect = $_;
-            last;
-          }
+          $aspect = $_;
+          last;
         }
-        
-        $self->{diaspora}->add_user_to_aspect( $pm->{from_user_id}, $aspect->{aspect_id} );
-        push @added, $_;
       }
+      $self->{diaspora}->add_user_to_aspect( $pm->{from_user_id}, $aspect->{aspect_id} );
+      push @added, $_;
     }
     print "SUBSCRIBE: Added user to feed \"$_\"\n";
   }
@@ -221,26 +256,26 @@ sub _handle_unsubscribe
   my $self = shift;
   my $pm = shift;
   my $params = @{$pm->{messages}}[0]->{content};
+  my @aspects = $self->{diaspora}->get_aspects();
   my @feeds;
   my @removed;
   my @error;
 
   my $regex = qr/${\(PATTERN_HREF)}/;
-  push @feeds, $1 while $params =~ /$regex/g;
+  push @feeds, decode_entities( $1 ) while $params =~ /$regex/g;
 
   my $st_get = $self->{db}->prepare( "SELECT * FROM feeds WHERE url=?;" );
   my $st_del = $self->{db}->prepare( "DELETE FROM feeds WHERE guid=?;" );
 
   foreach ( @feeds )
   {
-    $_ =~ s/\/$//;  # Cut off possible trailing / in order to avoid false duplicates
+    $_ =~ s/\/$//;  # Cut off possible trailing / in order to reduce false duplicates
    
     $st_get->execute( $_ );
     my $row = $st_get->fetchrow_hashref();
     if( $row )
     {
       my $aspect;
-      my @aspects = $self->{diaspora}->get_aspects();
       foreach ( @aspects )
       {
         if( $_->{name} eq $row->{guid} )
@@ -249,7 +284,7 @@ sub _handle_unsubscribe
           last;
         }
       }
-      
+     
       my $user_found = undef;
       my @users_in_aspect = @{$aspect->{user_ids}};
       foreach ( @users_in_aspect )
@@ -271,6 +306,7 @@ sub _handle_unsubscribe
           {
             $self->{diaspora}->delete_aspect( $aspect->{aspect_id} );
             $st_del->execute( $row->{guid} );
+            @aspects = $self->{diaspora}->get_aspects();  # Update to reflect changes
           }
         }
         push @removed, $_;
@@ -372,7 +408,8 @@ sub _link
   return sprintf "### [%s](%s)\r\n", $self->_escape($self->_strip($arg{title})), $self->_escape($arg{link}); 
 }
 
-sub _escape {
+sub _escape
+{
   my $self = shift;
   my $string = shift;
 	for($string)
@@ -383,11 +420,25 @@ sub _escape {
   return $string;
 }
 
-sub _strip {
+sub _strip
+{
   my $self = shift;
   my $string = shift;
   $string =~ tr/\x00-\x1F//d;
   return $string;
+}
+
+sub cmp_requests
+{
+  # Sorts requests in the following order: subscribe -> unsubscribe -> list
+  my $u = $a->{subject};
+  my $v = $b->{subject};
+  return  0 if $u eq $v;
+  return -1 if $u eq "subscribe";
+  return  1 if $v eq "subscribe";
+  return -1 if $u eq "unsubscribe";
+  return  1 if $v eq "unsubscribe";
+  return  0;  # For all unsupported strings
 }
 
 sub _db_prepare
@@ -396,7 +447,7 @@ sub _db_prepare
   $self->{db} = DBI->connect( "dbi:SQLite:$self->{db_path}" ) or die "Could not connect to sqlite db $self->{db_path}: $!\n";
   
   # Create table 'feeds'
-  my $sth = $self->{db}->prepare( "CREATE TABLE IF NOT EXISTS feeds (guid INTEGER PRIMARY KEY, url varchar(255) NOT NULL UNIQUE);" );
+  my $sth = $self->{db}->prepare( "CREATE TABLE IF NOT EXISTS feeds (guid INTEGER PRIMARY KEY, url varchar(255) NOT NULL UNIQUE, failcount INTEGER NOT NULL DEFAULT 0);" );
   $sth->execute() or die "Could not create table 'feeds' for sqlite db $self->{db_path}: $!\n";
 
   # Create table 'processed'

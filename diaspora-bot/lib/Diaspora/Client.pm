@@ -15,7 +15,8 @@ our $VERSION = '0.03';
 our %flags   = qw(pod 1 user 1 passwd 1 csrfparam 0 csrftoken 0 ua 0 wc 0 loggedin 0);
 
 # Constant regex patterns used for parsing the html responses
-use constant PATTERN_CONTACT        => "data-person-short-name='(.+?)' data-person_id='(.+?)'.+?<div class='info'>(.+?)</div>";
+use constant PATTERN_CONTACT        => "data-person-short-name='(.+?)' data-person_id='(.+?)'.+?<a href=\"(.+?)\".+?<div class='info'>(.+?)</div>";
+use constant PATTERN_CONTACT_ID     => "contact_id=([0-9]+)";
 use constant PATTERN_ASPECT         => "data-aspect_id='(.+?)'><a class='aspect_selector' href=.+?>(.+?)<div class='contact_count'>";
 use constant PATTERN_ASPECT_CONTACT => "<img alt=.+?class=\"avatar\" data-person_id=\"(.+?)\" src=.+? title=.+?>";
 use constant PATTERN_CONVERSATION   => "<div class=(?:'stream_element conversation'|'conversation stream_element unread') data-guid='(.+?)'.+?data-person_id=\"(.+?)\".+?<div class='ltr'>(.+?)</div>";
@@ -102,7 +103,8 @@ sub login
     $request->header( 'Content-Type' => 'application/x-www-form-urlencoded' );
 
     my %plist = (
-	         uri_escape('utf8')               => uri_escape('&#x2713;'),
+#	         uri_escape('utf8')               => uri_escape('&#x2713;'),
+           uri_escape('utf8')                  => '%E2%9C%93',                
 	         uri_escape($self->csrfparam)     => uri_escape($self->csrftoken),
 	         uri_escape('user[username]')     => uri_escape($self->user),
 	         uri_escape('user[password]')     => uri_escape($self->passwd),
@@ -202,11 +204,27 @@ sub get_contacts
     $last = @contacts;
     my $html = $self->_get( uri => '/contacts?set=all&page='.$counter++ );
     $html =~ s/[\n\r]//mg;
-
     my $regex = qr/${\(PATTERN_CONTACT)}/;
-    push @contacts, { "short_name" => $1, "user_id" => $2, "handle" => $3 } while $html =~ /$regex/g;
+    push @contacts, { "short_name" => $1, "user_id" => $2, "contact_id" => $3, "handle" => $4 } while $html =~ /$regex/g;
   }
   while( $last < @contacts );
+
+  # Resolve contact_ids
+  foreach( @contacts )
+  {
+    my $html = $self->_get( uri => $_->{contact_id} );
+    $html =~ s/[\n\r]//mg;
+    my $regex = qr/${\(PATTERN_CONTACT_ID)}/;
+    
+    if( $html =~ /$regex/g )
+    {
+      $_->{contact_id} = $1
+    }
+    else
+    {
+      $_->{contact_id} = "";
+    }
+  }
   return @contacts;
 }
 
@@ -247,7 +265,8 @@ sub create_aspect
   $request->header( 'Content-Type' => 'application/x-www-form-urlencoded' );
 
   my %plist = (
-                uri_escape('utf8')                      => uri_escape('&#x2713;'),
+#                uri_escape('utf8')                      => uri_escape('&#x2713;'),
+                uri_escape('utf8')                  => '%E2%9C%93',                
                 uri_escape($self->csrfparam)            => uri_escape($self->csrftoken),
                 uri_escape('aspect[name]')              => uri_escape($name),
                 uri_escape('aspect[contacts_visible]')  => uri_escape(0),
@@ -344,6 +363,40 @@ sub get_conversations
   return @conversations;
 }
 
+sub send_conversation
+{
+  my $self = shift;
+  my @contact_ids = shift;
+  my $subject = shift;
+  my $message = shift;
+
+  my $contact_ids = join( ',', @contact_ids );
+
+  $self->login();
+  
+  my $request = HTTP::Request->new( 'POST', $self->pod.'/conversations' );
+  $request->header( 'Connection'    => 'keep-alive' );
+  $request->header( 'Content-Type'  => 'application/x-www-form-urlencoded' );
+
+  my %plist = (
+                uri_escape('utf8')                  => '%E2%9C%93',                
+                uri_escape($self->csrfparam)        => uri_escape($self->csrftoken),
+                uri_escape('contact_autocomplete')  => uri_escape( '' ),
+                uri_escape('contact_ids')           => uri_escape(',,'.$contact_ids.','),
+                uri_escape('conversation[subject]') => uri_escape($subject),
+                uri_escape('conversation[text]')    => uri_escape($message),
+                uri_escape('commit')                => uri_escape('Send')
+              );
+
+  my $post = join '&', map { join '=', ($_, $plist{$_}) } keys %plist;
+
+  $request->content( $post );
+  my $redirect = $self->ua->request( $request )->header( "Location" ) or croak "Could not reply to conversation: $!" ;
+  $redirect =~ m/.+?conversation_id=(.+)/;
+  sleep( 5 ); # Wait a bit, it seems processing on server side takes some time. If a subsequent delete_conversation() is called immediately, the message does not get deleted?!
+  return $1;  # Return id of created conversation, for convenience
+}
+
 sub reply_conversation
 {
   my $self = shift;
@@ -357,7 +410,8 @@ sub reply_conversation
   $request->header( 'Content-Type' => 'application/x-www-form-urlencoded' );
 
   my %plist = (
-                uri_escape('utf8')            => uri_escape('&#x2713;'),
+#                uri_escape('utf8')            => uri_escape('&#x2713;'),
+                uri_escape('utf8')            => '%E2%9C%93',                
                 uri_escape($self->csrfparam)  => uri_escape($self->csrftoken),
                 uri_escape('message[text]')   => uri_escape($message),
                 uri_escape('commit')          => uri_escape('Reply')
