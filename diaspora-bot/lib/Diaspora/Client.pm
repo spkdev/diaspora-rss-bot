@@ -93,9 +93,9 @@ sub login
     my $sign_in_page = $self->ua->get( $self->pod.'/users/sign_in' )->decoded_content()
       or croak "Could not connect to " . $self->pod . ": $!";
 
-    $sign_in_page =~ m/"csrf-param" content="([^"]+)"/ or croak "Could not find csrf-param on loginpage of " . $self->pod;
+    $sign_in_page =~ m/content="([^"]+)" name="csrf-param"/ or croak "Could not find csrf-param on loginpage of " . $self->pod;
     $self->csrfparam( decode_entities($1) );
-    $sign_in_page =~ m/"csrf-token" content="([^"]+)"/ or croak "Could not find csrf-token on loginpage of " . $self->pod;
+    $sign_in_page =~ m/content="([^"]+)" name="csrf-token"/ or croak "Could not find csrf-token on loginpage of " . $self->pod;
     $self->csrftoken( decode_entities($1) );
 
     my $request = HTTP::Request->new( 'POST', $self->pod.'/users/sign_in' );
