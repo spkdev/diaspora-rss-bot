@@ -213,6 +213,7 @@ sub _handle_help
   my $pm = shift;
   $self->{diaspora}->reply_conversation( $pm->{conversation_id}, HELP_MESSAGE );
   $self->{diaspora}->delete_conversation( $pm->{conversation_id} );
+  print "HELP command handled\n";
 }
 
 sub _handle_subscribe
@@ -273,6 +274,7 @@ sub _handle_subscribe
   }
   $self->{diaspora}->reply_conversation( $pm->{conversation_id}, $response );
   $self->{diaspora}->delete_conversation( $pm->{conversation_id} );
+  print "SUBSCRIBE command handled\n";
 }
 
 sub _handle_unsubscribe
@@ -361,6 +363,7 @@ sub _handle_unsubscribe
 
   $self->{diaspora}->reply_conversation( $pm->{conversation_id}, $response );
   $self->{diaspora}->delete_conversation( $pm->{conversation_id} );
+  print "UNSUBSCRIBE command handled\n";
 }
 
 sub _handle_list
@@ -399,6 +402,7 @@ sub _handle_list
 
   $self->{diaspora}->reply_conversation( $pm->{conversation_id}, $response );
   $self->{diaspora}->delete_conversation( $pm->{conversation_id} );
+  print "LIST command handled\n";
 }
 
 sub _handle_invalid
@@ -409,6 +413,7 @@ sub _handle_invalid
   my $message = "**Your request is invalid, please refer to the help to see what commands are currently supported:**\n\n".HELP_MESSAGE;
   $self->{diaspora}->reply_conversation( $pm->{conversation_id}, $message );
   $self->{diaspora}->delete_conversation( $pm->{conversation_id} );
+  print "INVALID command handled\n";
 }
 
 sub _format_message
