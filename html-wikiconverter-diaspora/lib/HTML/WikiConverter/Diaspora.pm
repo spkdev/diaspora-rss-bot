@@ -19,11 +19,12 @@ sub postprocess_output
 {
   my( $self, $outref ) = @_;
   # Convert a regular image link to a 'clickable' image link. Image links that are already 'clickable' are left as is.
-  $$outref =~ s/([^[]\s*)!\[([^]]*)]\(([^)]*)\)/$1\[!\[$2\]\($3\)\]\($3\)/g;
+  $$outref =~ s/^([^[]*)!\[([^]]*)]\(([^)]*)\)/$1\[!\[$2\]\($3\)\]\($3\)/g;
+  $$outref =~ s/^(.*\][^[]*)!\[([^]]*)]\(([^)]*)\)/$1\[!\[$2\]\($3\)\]\($3\)/g;
   $$outref =~ s/^!\[([^]]*)]\(([^)]*)\)/\[!\[$1\]\($2\)\]\($2\)/g;
 
   # Append linebreaks after image, so subsequent text starts on new paragraph 
-  $$outref =~ s/(\[!\[[^]]*\]\([^]]*\)\]\([^]]*\))/$1\n\n/g;
+  $$outref =~ s/(\[[^]]*!\[[^]]*\]\([^]]*\)\]\([^]]*\))/$1\n\n/g;
 }
 
 sub _a_replace
