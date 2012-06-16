@@ -26,9 +26,9 @@ sub postprocess_output
   # Append linebreaks after image, so subsequent text starts on new paragraph 
   $$outref =~ s/(\[[^]]*!\[[^]]*\]\([^]]*\)\]\([^]]*\))/$1\n\n/g;
 
-  # Insert space char between '(]' and ')]' because otherwise Diaspora fucks this up
-  $$outref =~ s/\(\]/\( \]/g;
+  # Insert space char between ')]' and ')[' because otherwise Diaspora fucks this up
   $$outref =~ s/\)\]/\) \]/g;
+  $$outref =~ s/\)\[/\) \[/g;
 }
 
 sub _a_replace
