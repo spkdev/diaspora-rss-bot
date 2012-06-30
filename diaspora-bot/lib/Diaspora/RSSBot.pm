@@ -146,7 +146,7 @@ sub process_feeds
           my $title     = utf8::is_utf8($_->title)  ? encode('utf8', $_->title)  : $_->title;
           $content      = utf8::is_utf8($content)   ? encode('utf8', $content)   : $content;
 
-          my $guid = md5_hex( $title.$content ); # This to get _every_ update of the post, or use url to only get it once?!
+          my $guid = md5_hex( $link );
           $st_get_processed->execute( $guid );
           if( !$st_get_processed->fetchrow_hashref() )
           {
